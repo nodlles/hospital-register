@@ -1,0 +1,12 @@
+services:
+  hospital-register:
+    build: .
+    container_name: hospital-register
+    ports:
+      - "8000:8000"
+    environment:
+      HOSPITAL_CONFIG: /app/.hospital-register/config.local.json
+      TZ: Asia/Shanghai
+    volumes:
+      - ./.hospital-register:/app/.hospital-register
+    restart: unless-stopped

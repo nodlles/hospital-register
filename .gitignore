@@ -1,0 +1,27 @@
+# Local runtime config and imported authorization data.
+config.json
+config.local.json
+.hospital-register/
+.env
+.env.*
+
+# User-exported browser/API captures may contain cookies or tokens.
+*.har
+*.curl
+
+# Python/runtime cache.
+__pycache__/
+*.py[cod]
+.mypy_cache/
+*.log
+
+# Local editor and OS files.
+.vscode/
+.idea/
+.DS_Store
+
+# Local state.
+.omx/
+*.sqlite
+*.sqlite3
+*.db

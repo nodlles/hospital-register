@@ -1,0 +1,46 @@
+{
+  "base_url": "https://appaceso.zryhyy.com.cn",
+  "headers": {
+    "User-Agent": "REPLACE_WITH_REQABLE_CURL_USER_AGENT",
+    "Cookie": "REPLACE_WITH_REQABLE_CURL_COOKIE",
+    "Referer": "REPLACE_WITH_REQABLE_CURL_REFERER"
+  },
+  "tls": {
+    "ca_bundle": "",
+    "insecure_skip_verify": false
+  },
+  "target": {
+    "dept_code": "Z279",
+    "dept_name": "痤疮专病门诊(皮肤)",
+    "district_code": "001",
+    "patient_code": "REPLACE_WITH_PATIENT_CODE",
+    "prefer_periods": ["AM", "PM"],
+    "prefer_doctor_codes": [],
+    "prefer_source_names": ["专家门诊"],
+    "expert_mode": "prefer",
+    "max_price": null
+  },
+  "endpoints": {
+    "calendar": "/api/mobile/source/dept/calendar",
+    "detail": "/api/mobile/source/dept/detail",
+    "time_intervals": "",
+    "pre_submit_check": "/api/mobile/source/locking/pre/check",
+    "submit": "REPLACE_WITH_SUBMIT_PATH_FROM_REQABLE"
+  },
+  "polling": {
+    "start_at": "14:58:00",
+    "end_after_seconds": 240,
+    "interval_before_release": 1.0,
+    "interval_after_release": 0.5,
+    "release_at": "15:00:00"
+  },
+  "submit": {
+    "enabled": true,
+    "send_msg": false,
+    "confirm_phrase": "CONFIRM"
+  },
+  "notify": {
+    "enabled": false,
+    "channels": []
+  }
+}

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>中日友好医院挂号监控</title>
+    <link rel="stylesheet" href="/styles.css?v=notify-persist-1" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>中日友好医院挂号监控</h1>
+        <div id="configStatus" class="config-status pending">正在读取配置</div>
+      </div>
+      <div class="status-pill" id="taskState">未启动</div>
+    </header>
+
+    <main class="layout">
+      <section class="panel setup-panel" id="setupPanel">
+        <div class="section-title">
+          <h2>授权与配置</h2>
+          <button id="hideSetupButton" class="ghost">收起</button>
+        </div>
+        <div class="setup-grid">
+          <div class="setup-step">
+            <strong>1. 扫码授权</strong>
+            <p>用微信扫描医院小程序码，在小程序内完成登录和就诊人选择。</p>
+            <div class="qr-box" id="qrBox">医院小程序码</div>
+          </div>
+          <div class="setup-step">
+            <strong>2. 导入本地配置</strong>
+            <p>推荐上传 Reqable、Charles 或 Proxyman 导出的 HAR；也可以粘贴单条请求的 cURL。</p>
+            <label>
+              HAR 文件
+              <input id="harInput" type="file" accept=".har,.json,application/json" />
+            </label>
+            <div class="actions">
+              <button id="importHarButton">导入 HAR</button>
+              <button id="validateAuthButton" class="ghost">验证登录态</button>
+            </div>
+            <label>
+              cURL
+              <textarea id="curlInput" placeholder="curl 'https://appaceso.zryhyy.com.cn/...' -H 'a-ticket: ...' --data-raw '{...}'"></textarea>
+            </label>
+            <div class="actions">
+              <button id="importCurlButton">导入 cURL</button>
+            </div>
+          </div>
+        </div>
+        <div class="setup-checklist" id="setupChecklist"></div>
+        <p class="setup-message" id="setupMessage"></p>
+        <div class="config-detail" id="configDetail"></div>
+      </section>
+
+      <div class="layout-column left-column">
+        <section class="panel control-panel">
+          <div class="section-title">
+            <h2>挂号条件</h2>
+            <button id="refreshButton" class="ghost">刷新</button>
+          </div>
+
+          <label>
+            院区
+            <select id="districtSelect"></select>
+          </label>
+
+          <label class="dept-field">
+            门诊科室
+            <input id="deptSearch" type="search" placeholder="输入科室名称筛选" />
+            <select id="deptSelect" size="9"></select>
+          </label>
+
+          <div class="grid-2 date-period-grid">
+            <label>
+              挂号日期
+              <select id="dateSelect"></select>
+            </label>
+            <label>
+              上午/下午
+              <select id="periodSelect">
+                <option value="">不限</option>
+                <option value="AM">上午</option>
+                <option value="PM">下午</option>
+              </select>
+            </label>
+          </div>
+          <p id="dateDetail" class="date-detail"></p>
+          <p class="hint">挂号规则允许预约 8 天内号源；第 9/10 天可提前建监控任务，等进入放号窗口后自动继续查。</p>
+
+          <label>
+            医生策略
+            <select id="doctorModeSelect">
+              <option value="any">不限医生</option>
+              <option value="prefer">专家优先</option>
+              <option value="required">必须专家</option>
+            </select>
+          </label>
+
+          <div class="grid-3">
+            <label>
+              开始时间
+              <input id="startAt" type="time" step="1" />
+            </label>
+            <label>
+              监控时长(秒)
+              <input id="endAfter" type="number" min="10" value="240" />
+            </label>
+            <label>
+              间隔(秒)
+              <input id="interval" type="number" min="0.2" step="0.1" value="1" />
+            </label>
+          </div>
+
+          <div class="actions">
+            <button id="startButton">开启监控</button>
+            <button id="stopButton" class="danger">停止监控</button>
+          </div>
+        </section>
+
+      </div>
+
+      <div class="layout-column right-column">
+        <section class="panel source-panel">
+          <div class="section-title">
+            <h2>号源</h2>
+            <button id="loadSourcesButton" class="ghost">查询号源</button>
+          </div>
+          <div id="sourcesList" class="list empty">请选择科室和日期</div>
+        </section>
+
+        <section class="panel log-panel">
+          <div class="section-title">
+            <h2>监控日志</h2>
+            <button id="clearLogsButton" class="ghost">清空显示</button>
+          </div>
+          <div id="taskSummary" class="task-summary muted">暂无监控任务</div>
+          <pre id="logs"></pre>
+        </section>
+
+        <section class="panel notify-panel">
+          <div class="section-title">
+            <h2>消息通知</h2>
+            <span id="notifyState" class="mini-state warning">待配置</span>
+          </div>
+          <div class="notify-toolbar">
+            <label class="notify-toggle">
+              <input id="notifyEnabled" type="checkbox" />
+              <span class="notify-switch" aria-hidden="true"></span>
+              <span class="notify-toggle-copy">
+                <strong id="notifyToggleTitle">当前渠道：Bark</strong>
+                <small id="notifyToggleDetail">待配置；开启后，命中号源、待支付和监控启停会发送提醒</small>
+              </span>
+            </label>
+          </div>
+          <div class="grid-2 notify-primary-grid">
+            <label>
+              渠道
+              <select id="notifyType">
+                <option value="bark">Bark</option>
+                <option value="serverchan">Server 酱</option>
+                <option value="telegram">Telegram</option>
+                <option value="webhook">自定义 Webhook</option>
+              </select>
+            </label>
+            <label>
+              名称
+              <input id="notifyName" type="text" placeholder="手机通知" />
+            </label>
+          </div>
+          <div class="notify-fields">
+            <label class="notify-field notify-bark">
+              Bark Server
+              <input id="barkServerUrl" type="url" placeholder="https://api.day.app" autocomplete="off" />
+            </label>
+            <label class="notify-field notify-bark">
+              Bark Device Key
+              <input id="barkDeviceKey" type="password" placeholder="填写新 Key 或保留已配置值" autocomplete="off" />
+            </label>
+            <label class="notify-field notify-serverchan">
+              Server 酱 SendKey
+              <input id="serverChanSendKey" type="password" placeholder="填写新 SendKey 或保留已配置值" autocomplete="off" />
+            </label>
+            <div class="grid-2 notify-field notify-telegram">
+              <label>
+                Telegram Bot Token
+                <input id="telegramBotToken" type="password" placeholder="填写新 Token 或保留已配置值" autocomplete="off" />
+              </label>
+              <label>
+                Telegram Chat ID
+                <input id="telegramChatId" type="password" placeholder="填写 Chat ID 或频道名" autocomplete="off" />
+              </label>
+            </div>
+            <div class="grid-2 notify-field notify-webhook">
+              <label>
+                请求方式
+                <select id="notifyMethod">
+                  <option value="POST">POST</option>
+                  <option value="GET">GET</option>
+                </select>
+              </label>
+              <label>
+                Webhook URL
+                <input id="notifyUrl" type="url" placeholder="https://example.com/webhook" autocomplete="off" />
+              </label>
+            </div>
+          </div>
+          <p class="hint notify-hint">密钥只保存在本地配置，页面只显示是否已配置，不回显原文。</p>
+          <div class="actions notify-actions">
+            <button id="saveNotifyButton">保存通知</button>
+            <button id="testNotifyButton" class="ghost">发送测试</button>
+            <p class="setup-message" id="notifyMessage"></p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script src="/app.js?v=notify-persist-1"></script>
+  </body>
+</html>
