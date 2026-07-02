@@ -172,6 +172,20 @@ def is_rate_limit_error(exc: BaseException) -> bool:
     return "code=10000" in text or "请求过于频繁" in text
 
 
+def is_auth_expired_error(exc: BaseException) -> bool:
+    """判断是否为登录态过期错误（HTTP 401 或医院接口返回的常见 auth 错误码）。"""
+    text = str(exc)
+    # HTTP 层 401
+    if "HTTP 401" in text:
+        return True
+    # 医院 JSON 业务码：401 / 40001 / 100001 常见于 token 过期
+    if "code=401" in text or "code=40001" in text or "code=100001" in text:
+        return True
+    # 部分接口在 message 里直接说明未登录
+    lower = text.lower()
+    return ("未登录" in text or "登录过期" in text or "token" in lower and "expire" in lower)
+
+
 def rate_limit_backoff_seconds(consecutive_count: int) -> int:
     index = max(1, consecutive_count) - 1
     return MONITOR_RATE_LIMIT_BACKOFF_SECONDS[min(index, len(MONITOR_RATE_LIMIT_BACKOFF_SECONDS) - 1)]
@@ -975,6 +989,15 @@ class MonitorManager:
                         break
                     self.log(f"第 {attempt} 次检查暂无号源")
                 except Exception as exc:  # noqa: BLE001 - keep monitor alive.
+                    if is_auth_expired_error(exc):
+                        # 登录态已过期，继续轮询没有意义，停止并明确提示用户
+                        msg = "授权已过期，请重新导入 headers 后再启动监控（" + str(exc) + "）"
+                        self.log(msg)
+                        try:
+                            watch.send_notification(cfg, "中日友好医院监控已停止", msg, event="monitor_stopped")
+                        except Exception:  # noqa: BLE001
+                            pass
+                        break
                     if is_rate_limit_error(exc):
                         rate_limit_count += 1
                         pause_seconds = rate_limit_backoff_seconds(rate_limit_count)

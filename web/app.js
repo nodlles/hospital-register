@@ -524,11 +524,20 @@ function startPolling() {
 async function submitSource(source) {
   const phrase = prompt("输入确认词才会提交预约，成功后请到小程序内支付。");
   if (!phrase) return;
-  const data = await api("/api/submit", {
-    method: "POST",
-    body: JSON.stringify({ confirmPhrase: phrase, source }),
-  });
-  alert(`提交完成：${JSON.stringify(data.result)}`);
+  try {
+    const data = await api("/api/submit", {
+      method: "POST",
+      body: JSON.stringify({ confirmPhrase: phrase, source }),
+    });
+    // 医院接口即使 HTTP 200 也可能通过 code != 0 表示业务失败
+    if (data.result?.code !== 0) {
+      alert(`提交失败：${data.result?.message || JSON.stringify(data.result)}`);
+    } else {
+      alert(`提交成功：${JSON.stringify(data.result)}`);
+    }
+  } catch (err) {
+    alert(`提交出错：${err.message}`);
+  }
   await refreshTask();
 }
 

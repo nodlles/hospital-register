@@ -278,6 +278,36 @@ def ensure_success(obj: dict[str, Any], label: str) -> None:
         raise WatchError(f"{label} 返回异常: code={obj.get('code')} message={obj.get('message')}")
 
 
+def _verify_source_available(cfg: dict[str, Any], src: Source) -> None:
+    """提交前实时查询 detail 接口，确认号源仍然有余量；若已失效则抛出 WatchError。"""
+    try:
+        detail_rows = fetch_detail(cfg, src.visit_date)
+    except WatchError as exc:
+        # detail 查询失败时打印警告但不阻断提交，避免因接口抖动导致无法挂号
+        print(f"[warn] 提交前 detail 验证失败（继续提交）: {exc}")
+        return
+    for period in detail_rows:
+        if str(period.get("periodType") or "") != src.period_type:
+            continue
+        for item in period.get("sourceList") or []:
+            if str(item.get("sourceCode") or "") != src.source_code:
+                continue
+            if item.get("sourceStatus") != "HAVE_INVENTORY":
+                raise WatchError(
+                    f"号源已失效（sourceStatus={item.get('sourceStatus')}），"
+                    f"可能已被抢占：{src.label()}"
+                )
+            try:
+                count = int(item.get("count") or 0)
+            except (TypeError, ValueError):
+                count = 0
+            if count <= 0:
+                raise WatchError(f"号源余量为 0，可能已被抢占：{src.label()}")
+            return  # 验证通过
+    # 未在 detail 结果中找到该号源，视为已失效
+    raise WatchError(f"号源已从列表消失，可能已被抢占：{src.label()}")
+
+
 def discover_sources(cfg: dict[str, Any]) -> list[Source]:
     calendar = fetch_calendar(cfg)
     visit_dates = [
@@ -338,6 +368,20 @@ def expand_time_intervals(cfg: dict[str, Any], src: Source) -> list[Source]:
         return [src]
     intervals = fetch_time_intervals(cfg, src)
     if not intervals:
+        # 该号源声明支持分时段，但接口返回空列表，回退到基础号源（提交时可能因缺少
+        # timeIntervalCode 而失败）。用户应在配置中补充 endpoints.time_intervals。
+        if not cfg["endpoints"].get("time_intervals"):
+            print(
+                f"[warn] {src.label()} 支持分时段 (supportTimeInterval=true)"
+                " 但未配置 endpoints.time_intervals，"
+                "提交时可能因缺少 timeIntervalCode 而失败。"
+                "请从 Reqable 抓包补充分时段查询接口路径。"
+            )
+        else:
+            print(
+                f"[warn] time_intervals 接口返回空列表，"
+                f"号源 {src.label()} 无可用分时段，回退到基础号源"
+            )
         return [src]
     available: list[Source] = []
     for interval in intervals:
@@ -557,6 +601,13 @@ def build_submit_body(cfg: dict[str, Any], src: Source) -> dict[str, Any]:
         "treatmentPeriodType": src.period_type,
         "sendMsg": bool(cfg["submit"].get("send_msg", False)),
     }
+    if src.support_time_interval and not src.time_interval_code:
+        # 该号源需要分时段预约但没有 timeIntervalCode，提交大概率失败
+        raise WatchError(
+            f"号源 {src.label()} 需要分时段预约 (supportTimeInterval=true)"
+            " 但缺少 timeIntervalCode。"
+            " 请在配置中补充 endpoints.time_intervals 分时段查询接口路径。"
+        )
     if src.time_interval_code:
         body["timeIntervalCode"] = src.time_interval_code
     return body
@@ -591,12 +642,17 @@ def submit_source(cfg: dict[str, Any], src: Source) -> dict[str, Any]:
     path = cfg["endpoints"].get("submit")
     if not path or "REPLACE_" in path:
         raise WatchError("未配置提交接口 endpoints.submit")
+    # 提交前实时验证号源仍然可用，避免命中时号源已被抢占
+    _verify_source_available(cfg, src)
     body = build_submit_body(cfg, src)
     pre_check_path = cfg["endpoints"].get("pre_submit_check")
     if pre_check_path:
         pre_check = request_json(cfg, pre_check_path, method="POST", body=body)
         ensure_success(pre_check, "pre_submit_check")
-    return request_json(cfg, path, method="POST", body=body)
+    obj = request_json(cfg, path, method="POST", body=body)
+    # 医院接口即使 HTTP 200 也可能通过 code != 0 表示提交失败
+    ensure_success(obj, "submit")
+    return obj
 
 
 def watch(cfg: dict[str, Any], *, once: bool, wait: bool) -> list[Source]:
