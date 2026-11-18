@@ -313,7 +313,8 @@ def public_config(cfg: dict[str, Any]) -> dict[str, Any]:
         "baseUrl": cfg.get("base_url"),
         "auth": {
             "headers": summarize_headers(cfg.get("headers") or {}),
-            "qrAuthSupported": False,
+            "qrAuthSupported": True,
+            "devtoolsSupported": True,
             "configPath": str(CONFIG_PATH),
         },
         "notify": public_notify_config(cfg.get("notify") or {}),
@@ -511,6 +512,65 @@ def import_request_into_config(
     }
 
 
+def import_devtools_into_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """不用抓包：从小程序运行时里直接把登录态采集出来写进配置。
+
+    这是「扫码登录一次，之后不用管」的主路径。HAR / cURL 退成兜底。
+    """
+    import wxdevtools
+
+    channel = wxdevtools.channel_from_local(
+        expect_app=wxdevtools.HOSPITAL_APP_IDS["zry"])
+    try:
+        collected = channel.collect(timeout=15)
+        app_id = channel.app_id
+        account = channel.account_info()
+    finally:
+        channel.close()
+    payload = collected["payload"]
+    if not is_hospital_url(payload["base_url"]):
+        raise ValueError(f"采到的请求不是已支持的医院域名：{payload['base_url']}")
+    update_known_endpoint(cfg.setdefault("endpoints", {}), payload["path"])
+    import_patient_code(cfg, payload.get("body") or "")
+    result = import_request_into_config(cfg, payload, source="devtools",
+                                       candidates=len(collected["requests"]))
+    result["appId"] = app_id
+    result["miniProgramVersion"] = account.get("version") or ""
+    result["summary"] = collected["summary"]
+    result["userAgentFilled"] = bool(collected.get("userAgent"))
+    result["refererFilled"] = bool(collected.get("referer"))
+    return result
+
+
+def devtools_status() -> dict[str, Any]:
+    """页面用：这台机器上能不能自动采集，采到的是哪个小程序。"""
+    try:
+        import wxdevtools
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "reason": f"模块不可用: {exc}"}
+    try:
+        channel = wxdevtools.channel_from_local()
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "reason": str(exc)}
+    try:
+        info = channel.account_info()
+        app_id = info.get("appId") or channel.app_id
+        target = wxdevtools.HOSPITAL_APP_IDS["zry"]
+        return {
+            "available": True,
+            "appId": app_id,
+            "miniProgramVersion": info.get("version") or "",
+            "title": channel.title,
+            "referer": channel.referer(),
+            "targetAppId": target,
+            "matchesTarget": app_id == target,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "reason": str(exc)}
+    finally:
+        channel.close()
+
+
 def import_har_into_config(cfg: dict[str, Any], content: str) -> dict[str, Any]:
     try:
         har = json.loads(content)
@@ -551,8 +611,18 @@ def request_from_har_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+# 已经支持的小程序域名。加新医院时只改这一处。
+HOSPITAL_HOSTS = (
+    "appaceso.zryhyy.com.cn",      # 中日友好医院
+    "app.bdkq.mingxuan.store",     # 北京大学口腔医院
+)
+
+
 def is_hospital_url(base_url: str) -> bool:
-    return urllib.parse.urlparse(base_url).netloc == "appaceso.zryhyy.com.cn"
+    host = urllib.parse.urlparse(base_url).netloc.lower()
+    if not host:
+        return False
+    return any(host == item or host.endswith("." + item) for item in HOSPITAL_HOSTS)
 
 
 def har_request_score(item: dict[str, Any]) -> tuple[int, int, int]:
@@ -1166,6 +1236,8 @@ class Handler(SimpleHTTPRequestHandler):
                     if src.visit_date == date:
                         rows.append(source_to_dict(src))
                 self.send_json({"ok": True, "items": rows})
+            elif parsed.path == "/api/config/devtools":
+                self.send_json({"ok": True, "devtools": devtools_status()})
             elif parsed.path == "/api/tasks/status":
                 self.send_json({"ok": True, "task": MONITOR.snapshot()})
             else:
@@ -1203,6 +1275,18 @@ class Handler(SimpleHTTPRequestHandler):
                 result = import_curl_into_config(cfg, str(payload.get("curl") or ""))
                 save_cfg(cfg)
                 self.send_json({"ok": True, "imported": result, "config": public_config(cfg)})
+            elif parsed.path == "/api/config/import-devtools":
+                cfg = load_cfg()
+                try:
+                    result = import_devtools_into_config(cfg)
+                except Exception as exc:  # noqa: BLE001 - 让页面能落到 HAR 兜底
+                    self.send_json({"ok": False, "error": str(exc),
+                                    "fallback": "har"}, HTTPStatus.BAD_REQUEST)
+                    return
+                save_cfg(cfg)
+                self.send_json({"ok": True, "imported": result,
+                                "validation": validate_auth_status(cfg),
+                                "config": public_config(cfg)})
             elif parsed.path == "/api/config/import-har":
                 cfg = load_cfg()
                 result = import_har_into_config(cfg, str(payload.get("har") or ""))

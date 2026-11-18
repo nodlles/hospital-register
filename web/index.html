@@ -28,23 +28,30 @@
             <div class="qr-box" id="qrBox">医院小程序码</div>
           </div>
           <div class="setup-step">
-            <strong>2. 导入本地配置</strong>
-            <p>推荐上传 Reqable、Charles 或 Proxyman 导出的 HAR；也可以粘贴单条请求的 cURL。</p>
-            <label>
-              HAR 文件
-              <input id="harInput" type="file" accept=".har,.json,application/json" />
-            </label>
+            <strong>2. 获取登录态</strong>
+            <p>在手机的小程序里登录一次，之后点下面这个按钮自动读取，不用抓包。</p>
             <div class="actions">
-              <button id="importHarButton">导入 HAR</button>
+              <button id="importDevtoolsButton">一键获取（不用抓包）</button>
               <button id="validateAuthButton" class="ghost">验证登录态</button>
             </div>
-            <label>
-              cURL
-              <textarea id="curlInput" placeholder="curl 'https://appaceso.zryhyy.com.cn/...' -H 'a-ticket: ...' --data-raw '{...}'"></textarea>
-            </label>
-            <div class="actions">
-              <button id="importCurlButton">导入 cURL</button>
-            </div>
+            <p class="setup-hint" id="devtoolsHint"></p>
+            <details class="setup-advanced">
+              <summary>高级：手动导入 HAR / cURL</summary>
+              <label>
+                HAR 文件
+                <input id="harInput" type="file" accept=".har,.json,application/json" />
+              </label>
+              <div class="actions">
+                <button id="importHarButton" class="ghost">导入 HAR</button>
+              </div>
+              <label>
+                cURL
+                <textarea id="curlInput" placeholder="curl 'https://appaceso.zryhyy.com.cn/...' -H 'a-ticket: ...' --data-raw '{...}'"></textarea>
+              </label>
+              <div class="actions">
+                <button id="importCurlButton" class="ghost">导入 cURL</button>
+              </div>
+            </details>
           </div>
         </div>
         <div class="setup-checklist" id="setupChecklist"></div>

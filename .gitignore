@@ -2,6 +2,7 @@
 config.json
 config.local.json
 config.bdkq.local.json
+*.json.token
 probe-result.json
 .hospital-register/
 .env

@@ -2,6 +2,9 @@
 """北大口腔号源只读监控。
 
 **只读**：只调 getYyDeptList / getYyDoctorList 这类查询接口，不下单、不取消。
+
+token 不用人管：配置里留空也行，会走 `bdkq_token.ensure_client()`，
+优先用缓存 → 过期了就在微信运行时里调 `wx.login()` 自动换新的。
 下单参数（yyOrder / todayOrder 的字段名）还没用真实响应校准过，故意没写进来，
 等 bdkq_probe.py 跑通校准之后再单独做，避免拿着猜的字段往医院系统提交。
 
@@ -21,7 +24,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+import bdkq_token
 from bdkq_client import BdkqClient, BdkqError, load_config
+
+try:
+    from wxdevtools import DevtoolsError
+except Exception:  # noqa: BLE001 - 没有这个模块时仅影响自动续期
+    class DevtoolsError(RuntimeError):  # type: ignore[no-redef]
+        pass
 
 try:  # 复用主项目已经做好的通知通道（Bark / Server 酱 / Telegram / webhook）
     from hospital_watch import notify as desktop_notify
@@ -30,7 +40,10 @@ except Exception:  # noqa: BLE001 - 单独拷出来用时没有主项目也能�
     send_notification = None  # type: ignore[assignment]
     desktop_notify = None  # type: ignore[assignment]
 
-REMAIN_HINTS = ("remain", "left", "surplus", "yuyue", "available", "sourcecount", "number")
+# 已经用真实响应校准过的字段：getYyDeptList 里每个科室节点都带 `remainNum`。
+# 其余几个是防御性的，万一换接口还能兜住。
+REMAIN_HINTS = ("remainnum", "remain", "left", "surplus", "yuyue", "available",
+                "sourcecount", "number")
 
 
 def extract_remain(item: dict[str, Any]) -> tuple[str, int] | None:
@@ -148,9 +161,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     config = load_config(str(path))
-    client = BdkqClient.from_config(config)
-    if not client.access_token:
-        print("配置里没有 access_token，科室列表大概率读不到真实数据", file=sys.stderr)
+    try:
+        client, source = bdkq_token.ensure_client(config, path)
+    except (BdkqError, DevtoolsError) as exc:
+        print(f"拿不到 access_token: {exc}", file=sys.stderr)
+        print("要么手动把 access_token 写进配置，要么让微信运行时里能连上（python3 wxdevtools.py --doctor）",
+              file=sys.stderr)
+        return 2
+    print(f"access_token 来源: {source}")
 
     polling = config.get("polling") or {}
     interval = args.interval or float(polling.get("interval") or 5)
@@ -165,6 +183,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"开始监控，间隔 {interval}s，持续 {duration or '不限'}s，Ctrl-C 退出")
     try:
         while True:
+            if bdkq_token.needs_refresh(client.access_token):
+                try:
+                    client, source = bdkq_token.ensure_client(config, path)
+                    print(f"[{time.strftime('%H:%M:%S')}] token 已续期（来源 {source}）")
+                except (BdkqError, DevtoolsError) as exc:
+                    print(f"[{time.strftime('%H:%M:%S')}] 续期失败，继续用旧 token: {exc}",
+                          file=sys.stderr)
             if watch_once(client, config, state):
                 if config.get("polling", {}).get("stop_on_hit"):
                     break

@@ -60,8 +60,22 @@ IP 变了就重跑一次上面那条 curl 换掉它。模拟器里想设 hosts �
   拼出 `base_url`（去掉 `/{tenant}@{version}` 尾巴）和见过的接口路径清单。
   生成的配置权限 0600。
 
-- 或者在模拟器里跑小程序，登录后调 `client.login_with_code(code)`。
-  `code` 只能用一次，只能在微信运行时里取，见下面的「逆向记录」。
+- **或者什么都不用抓**（推荐）：让微信运行时里开着北大口腔小程序，然后
+
+  ```bash
+  python3 bdkq_token.py -c config.bdkq.local.json --force
+  python3 bdkq_watch.py -c config.bdkq.local.json --duration 300
+  ```
+
+  `bdkq_token.py` 会走 `wxdevtools` 通道在逻辑层调 `wx.login()` 拿 code，
+  再 `POST /login/wechat` 换成 token，token 连同 `api_version` 一起缓存到
+  `config.bdkq.local.json.token`（0600）。token 是 JWT，有效期两小时，
+  快到期会自动再换一次，所以 `bdkq_watch.py` 可以一直挂着跑。
+  配置里的 `access_token` 可以直接留空。
+
+  注意 `wx.login()` 的 code 是按小程序发的，所以换 token 前会核对运行时里
+  第一个打开的小程序 appId 是不是 `wxf47aa38d871be854`，不对会直接报错，
+  提示你重启运行时先开北大口腔——这个运行时的调试通道只挂第一个小程序。
 
 ### 2. 校准字段名
 
@@ -82,9 +96,10 @@ python3 bdkq_watch.py -c config.bdkq.local.json --once
 python3 bdkq_watch.py -c config.bdkq.local.json --duration 300 --interval 5
 ```
 
-盯 `getYyDeptList` 返回里科室节点的剩余号源字段，从少变多就推通知。
-剩余字段名也是启发式匹配（`remain/left/surplus/yuyue/available/...`），
-第一次没识别出来会打印该节点真实字段名，用它改 `REMAIN_HINTS`。
+盯 `getYyDeptList` 返回里科室节点的 `remainNum`（已用真实响应校准过，
+52 个科室每个都带这个字段），从少变多就推通知。
+其余几个候选字段名（`left/surplus/yuyue/available/...`）只是防御性的兜底，
+万一接口换了还能认出关键词来。
 
 注意 `bdkq_watch.py` **不会下单**。下单要等 probe 校准出 `yyOrder` /
 `todayOrder` 的字段名，而且要跟主项目一样有人工确认词才允许提交——
@@ -98,10 +113,14 @@ python3 bdkq_watch.py -c config.bdkq.local.json --duration 300 --interval 5
 | `bdkq_client.py` | `BdkqClient`：URL 拼接、签名、加密、解密、重登录、常用挂号方法 |
 | `bdkq_har.py` | HAR / cURL / 日志文本 → 配置 |
 | `bdkq_probe.py` | 只读探测 + 字段校准 |
-| `bdkq_watch.py` | 只读号源监控 + 通知 |
+| `bdkq_watch.py` | 只读号源监控 + 通知（token 自动续期） |
+| `bdkq_token.py` | `wx.login` → token 自动换取与续期，带本地缓存 |
+| `wxdevtools.py` | 免抓包通道：DevTools 协议读小程序登录态 / `wx.login` |
 | `bdkq_endpoints.json` | 从包体里提取的 132 个接口，按名字索引 |
 | `config.bdkq.example.json` | 配置样板 |
 | `tests/test_bdkq_crypto.py` | 25 条离线测试 |
+| `tests/test_bdkq_token.py` | token 解析、续期判定、缓存 18 条 |
+| `tests/test_wxdevtools.py` | 采集结果转配置的纯函数 28 条 |
 
 ## 与真服务器校准出来的两处修正（2026-11-18）
 
