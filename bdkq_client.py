@@ -11,7 +11,9 @@ URL 拼接规则（逆向自 app-service.js）：
 
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 import ssl
 import time
 import urllib.error
@@ -38,6 +40,40 @@ DEFAULT_UA = (
     "XWEB/5075 MMWEBSDK/20230604 MicroMessenger/8.0.80.52(0x28005034) "
     "MiniProgramEnv/android Luggage/2.2.0.86552af0-IoT NetType/WIFI Language/zh_CN ABI/arm64"
 )
+
+# 域名 → IP 覆盖表。这个医院的域名在公共 DNS 里是 127.0.0.1（DNSPod 上就是这条
+# A 记录），只有腾讯 HTTPDNS 才给真实回源 IP。为了不改系统 hosts 也能连，这里让
+# 客户端自己做「连 IP、TLS 和 Host 头仍用域名」，SNI 和证书校验都照常。
+_DNS_OVERRIDES: dict[str, str] = {}
+
+
+class _MappedHTTPSConnection(http.client.HTTPSConnection):
+    """连到覆盖表里的 IP，但 TLS 的 SNI 和 Host 头用的还是原域名。"""
+
+    def connect(self) -> None:
+        server_hostname = self._tunnel_host or self.host
+        ip = _DNS_OVERRIDES.get(self.host)
+        if not ip:
+            return super().connect()
+        self.sock = socket.create_connection(
+            (ip, self.port), self.timeout, self.source_address
+        )
+        if self._tunnel_host:
+            self._tunnel()
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=server_hostname)
+
+
+class _MappedHTTPConnection(http.client.HTTPConnection):
+    def connect(self) -> None:
+        ip = _DNS_OVERRIDES.get(self.host)
+        if not ip:
+            return super().connect()
+        self.sock = socket.create_connection(
+            (ip, self.port), self.timeout, self.source_address
+        )
+        if self._tunnel_host:
+            self._tunnel()
+
 
 # 业务码：0 成功；1000 登录态失效；1001 停诊/维护
 STATUS_OK = 0
@@ -80,6 +116,7 @@ class BdkqClient:
         extra_headers: dict[str, str] | None = None,
         verbose: bool = False,
         auto_relogin: Any | None = None,
+        resolve: dict[str, str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.tenant = tenant
@@ -89,7 +126,10 @@ class BdkqClient:
         self.extra_headers = dict(extra_headers or {})
         self.verbose = verbose
         self.auto_relogin = auto_relogin
+        self.resolve = dict(resolve or {})
+        _DNS_OVERRIDES.update(self.resolve)
         self._ssl_context = self._build_ssl_context(ca_bundle, insecure_skip_verify)
+        self._opener = self._build_opener()
 
     # ------------------------------------------------------------ 构造
 
@@ -112,6 +152,7 @@ class BdkqClient:
             ca_bundle=tls.get("ca_bundle") or "",
             insecure_skip_verify=bool(tls.get("insecure_skip_verify")),
             extra_headers=extra,
+            resolve=cfg.get("resolve") or {},
             **kwargs,
         )
 
@@ -125,6 +166,22 @@ class BdkqClient:
             ctx.verify_mode = ssl.CERT_NONE
             return ctx
         return ssl.create_default_context(cafile=ca_bundle)
+
+    def _build_opener(self) -> urllib.request.OpenerDirector:
+        context = self._ssl_context
+        handlers: list[Any] = []
+
+        class _HTTPS(urllib.request.HTTPSHandler):
+            def https_open(self, req):  # noqa: ANN001
+                return self.do_open(_MappedHTTPSConnection, req, context=context)
+
+        class _HTTP(urllib.request.HTTPHandler):
+            def http_open(self, req):  # noqa: ANN001
+                return self.do_open(_MappedHTTPConnection, req)
+
+        handlers.append(_HTTP())
+        handlers.append(_HTTPS())
+        return urllib.request.build_opener(*handlers)
 
     def url_for(self, path: str, query: dict[str, Any] | None = None) -> str:
         if path.startswith("http://") or path.startswith("https://"):
@@ -197,7 +254,7 @@ class BdkqClient:
 
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout, context=self._ssl_context) as resp:
+            with self._opener.open(req, timeout=self.timeout) as resp:
                 raw_bytes = resp.read()
                 response_headers = {k.lower(): v for k, v in resp.headers.items()}
         except urllib.error.HTTPError as exc:
@@ -216,11 +273,15 @@ class BdkqClient:
         except json.JSONDecodeError as exc:
             raise BdkqError(f"响应不是 JSON: {raw_bytes[:200]!r}") from exc
 
+        # 原文：if ("false" != (header.cipher || false).toString()) 才解密。
+        # 也就是「没有 cipher 头 = 不解密」（拒绝类响应直接给明文
+        # {"status":1000,"message":"访问受限"}），「cipher: true = 解 data」。
         cipher = str(response_headers.get("cipher", "false")).lower() != "false"
-        if cipher:
-            result = envelope
-        else:
+        has_body = isinstance(envelope.get("data"), str) and envelope["data"]
+        if cipher and has_body:
             result = decrypt_response(envelope, signature)
+        else:
+            result = envelope
 
         status = result.get("status")
         try:
@@ -228,11 +289,16 @@ class BdkqClient:
         except (TypeError, ValueError):
             status_int = -1
         message = str(result.get("message") or result.get("msg") or "")
+        # 登录态失效有两种表现：status 1000，或者网关回 {"code":"401","msg":...}
+        code = str(result.get("code") or "")
+        expired = status_int == STATUS_TOKEN_EXPIRED or code == "401"
 
-        if status_int == STATUS_TOKEN_EXPIRED and not retried and self.auto_relogin is not None:
+        if expired and not retried and self.auto_relogin is not None:
             self.auto_relogin(self)
             return self.request(path, method=method, query=query, body=body, retried=True)
 
+        if expired and status_int != STATUS_TOKEN_EXPIRED:
+            status_int = STATUS_TOKEN_EXPIRED   # 统一成一个码，调用方只判一种
         return BdkqResponse(status=status_int, message=message, data=result.get("data"), raw=result)
 
     # ------------------------------------------------------------ 登录

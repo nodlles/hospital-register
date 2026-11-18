@@ -36,11 +36,7 @@ class FakeHandler(BaseHTTPRequestHandler):
     def log_message(self, *args) -> None:  # 安静
         pass
 
-    def _reply(self, payload: dict, *, extra_headers: dict[str, str] | None = None) -> None:
-        signature = self.headers.get("signature") or ""
-        key = response_key(signature)
-        hexed = sm4_encrypt(json.dumps(payload, ensure_ascii=False).encode(), key).hex()
-        body = json.dumps({"data": hexed}).encode()
+    def _send(self, body: bytes, extra_headers: dict[str, str] | None = None) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -48,6 +44,17 @@ class FakeHandler(BaseHTTPRequestHandler):
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _reply(self, payload: dict, *, extra_headers: dict[str, str] | None = None) -> None:
+        """业务响应：加密 + cipher: true（真服务器就是这样回）。"""
+        signature = self.headers.get("signature") or ""
+        key = response_key(signature)
+        hexed = sm4_encrypt(json.dumps(payload, ensure_ascii=False).encode(), key).hex()
+        self._send(json.dumps({"data": hexed}).encode(), {"cipher": "true", **(extra_headers or {})})
+
+    def _reply_plain(self, payload: dict) -> None:
+        """拒绝类响应：明文，不带 cipher 头（真服务器回访问受限时就是这样）。"""
+        self._send(json.dumps(payload, ensure_ascii=False).encode())
 
     def _handle(self, method: str) -> None:
         parts = urlsplit(self.path)
@@ -76,8 +83,15 @@ class FakeHandler(BaseHTTPRequestHandler):
         if parts.path.endswith("/expired"):
             self._reply({"status": 1000, "message": "token 失效"})
             return
+        if parts.path.endswith("/gateway-401"):
+            # 真服务器在缺 token 时走网关，回 {"code":"401","msg":"token is not black"}
+            self._reply({"code": "401", "msg": "token is not black", "timestamp": 1})
+            return
         if parts.path.endswith("/out-of-service"):
-            self._reply({"status": 1001, "message": "系统维护"})
+            self._reply_plain({"status": 1001, "message": "系统维护"})
+            return
+        if parts.path.endswith("/plain-restricted"):
+            self._reply_plain({"status": 1000, "message": "访问受限"})
             return
         self._reply({"status": 0, "message": "ok",
                      "data": {"lists": [{"deptCode": "D1", "deptName": "口腔颌面外科",
@@ -160,6 +174,26 @@ class ClientTest(unittest.TestCase):
         client = BdkqClient(f"http://127.0.0.1:1", timeout=1.0)
         with self.assertRaises(BdkqError):
             client.get("/api/x")
+
+    def test_gateway_401_counts_as_expired(self) -> None:
+        calls = {"n": 0}
+
+        def relogin(client: BdkqClient) -> None:
+            calls["n"] += 1
+            client.access_token = "fresh"
+
+        client = BdkqClient(self.base, tenant="t-wx", api_version="331",
+                            access_token="stale", timeout=5.0, auto_relogin=relogin)
+        resp = client.get("/api/gateway-401")
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(resp.status, 1000)      # 401 归一成 1000，调用方只判一种
+        self.assertIn("token", resp.message)
+
+    def test_plain_response_is_not_decrypted(self) -> None:
+        # 没有 cipher 头 → 明文原样返回（真服务器的「访问受限」就是这样）
+        resp = self.client.get("/api/plain-restricted")
+        self.assertEqual(resp.status, 1000)
+        self.assertEqual(resp.message, "访问受限")
 
     def test_ensure_ok_raises_on_bad_status(self) -> None:
         resp = self.client.get("/api/out-of-service")

@@ -9,25 +9,39 @@
 
 | 部分 | 状态 |
 | --- | --- |
-| 加密/签名（`bdkq_crypto.py`） | 已实现，SM3/SM4 国标向量与 gmssl 交叉验证通过 |
-| 接口客户端（`bdkq_client.py`） | 已实现，25 条离线测试通过 |
+| 加密/签名（`bdkq_crypto.py`） | 已实现，SM3/SM4 国标向量与 gmssl 交叉验证通过，**已用真服务器验证** |
+| 接口客户端（`bdkq_client.py`） | 已实现，**已打通真服务器**（缺 token 时正确回 401） |
 | HAR / cURL 导入（`bdkq_har.py`） | 已实现，能从抓包生成配置 |
-| 字段探测（`bdkq_probe.py`） | 已实现，**需要真实 token 才能校准字段名** |
+| 字段探测（`bdkq_probe.py`） | 已实现，**差一个 access_token 才能校准字段名** |
 | 只读监控（`bdkq_watch.py`） | 已实现，不下单 |
 | 下单 | **没写**，参数名没校准，不猜 |
 
-## 一个绕不过去的问题
+## 域名解析：公共 DNS 是假的，HTTPDNS 才是真的
 
-`app.bdkq.mingxuan.store` 的 A 记录是 `127.0.0.1`（DNSPod，TTL 600），
-用 Cloudflare DoH、223.5.5.5、8.8.8.8、以及直接问权威 NS `ns3.dnsv2.com`
-（六条 ECS 线路）全都是 `127.0.0.1`，没有分线路解析。
+`app.bdkq.mingxuan.store` 的公共 A 记录是 `127.0.0.1`（DNSPod，TTL 600）。
+用 Cloudflare DoH、223.5.5.5、8.8.8.8、114、119.29.29.29、doh.pub，以及直接
+问权威 NS `ns3.dnsv2.com`（六条 ECS 线路）全都是 `127.0.0.1`，没有分线路。
 
-手机上微信里能正常打开，说明微信侧不走公共 DNS。所以：
-- 在普通网络里跑这些脚本，连不上这个域名，会得到 connection refused
-- 就算拿到 HAR 里的 token，也要先解决「从哪台机器能连上」
+**但腾讯 HTTPDNS 能查到真实回源 IP**：
 
-可能的走法（都还没验证）：让用户在能连的机器/网络里跑、抓 HAR 里的真实
-出口 IP 再 `--resolve`、或者在手机端配合代理转发。**这条不通，后面全都跑不起来。**
+```bash
+curl "http://119.29.29.29/d?dn=app.bdkq.mingxuan.store"
+# 101.201.62.105;8.147.234.254;39.105.140.139;39.107.211.246
+```
+
+四个 IP 都验证过：TCP 443 通、TLS 证书校验通过（`ssl_verify=0`）、nginx 回 200。
+微信自己走的就是这套 HTTPDNS，所以手机上能正常用。
+
+所以不需要改系统 hosts，配置里写 `resolve` 就行（客户端连 IP、SNI 和 Host 头
+仍然用域名，证书校验照做）：
+
+```json
+"resolve": { "app.bdkq.mingxuan.store": "8.147.234.254" }
+```
+
+IP 变了就重跑一次上面那条 curl 换掉它。模拟器里想设 hosts 需要 root，`adb root`
+在 production 版镜像上不行；改用「把模拟器的 http_proxy 指到一台只做转发的隧道
+代理」更省事（代理只把 CONNECT 的目标域名换成真实 IP，不做 MITM）。
 
 ## 用法
 
@@ -88,6 +102,24 @@ python3 bdkq_watch.py -c config.bdkq.local.json --duration 300 --interval 5
 | `bdkq_endpoints.json` | 从包体里提取的 132 个接口，按名字索引 |
 | `config.bdkq.example.json` | 配置样板 |
 | `tests/test_bdkq_crypto.py` | 25 条离线测试 |
+
+## 与真服务器校准出来的两处修正（2026-11-18）
+
+逆向时看漏了两个细节，都是拿真服务器对着打才发现的：
+
+1. **响应解密的 key 要把材料先反转**。原文是
+   `sm3((o = signature + ":" + secret, P(o) ? o : o.split("").reverse().join("")))`，
+   而 `P()` 是「空值判断」不是「可打印判断」，所以 `o` 永远非空、永远走反转分支。
+   漏了反转的话，解出来是乱码。
+2. **`cipher` 响应头是「要不要解密」的开关，不是「已解密」的标记**。原文
+   `if ("false" != (header.cipher || false).toString())` 才去解 `data`。
+   没有 `cipher` 头的响应（比如 `{"status":1000,"message":"访问受限"}`）是明文，
+   直接当结果用。
+
+另外确认：缺 token 时网关回 `{"code":"401","msg":"token is not black"}`，
+客户端把 `status 1000` 和 `code "401"` 统一归一成「登录态失效」。
+登录响应头里的 `x-version` 不是 `331` 而是 `3fdf7484` 这样的版本标识，
+后续请求必须用它——用 `default` 会被回 `1000 访问受限`。
 
 ## 逆向记录（校准参数时对照用）
 

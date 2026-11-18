@@ -284,7 +284,14 @@ def encrypt_body(payload: dict, signature: str) -> str:
 
 
 def response_key(signature: str, secret: str = API_SECRET) -> bytes:
-    raw = list(sm3_hex(f"{signature}:{secret}")[24:40])
+    """响应解密用的 key。
+
+    原文：sm3(P(o) ? o : o.split("").reverse().join(""))，o = signature + ":" + secret。
+    P() 是「空值判断」而不是「可打印判断」，所以 o 永远非空 → 永远走反转分支。
+    这一步之前漏了，导致拿真实响应解不出来（2026-11-18 用真服务器校准）。
+    """
+    material = f"{signature}:{secret}"[::-1]
+    raw = list(sm3_hex(material)[24:40])
     for i in range(0, len(raw) - 1, 2):
         raw[i], raw[i + 1] = raw[i + 1], raw[i]
     return "".join(raw).encode("ascii")

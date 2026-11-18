@@ -148,8 +148,21 @@ class TestBodyAndResponse(unittest.TestCase):
     def test_body_key_is_signature_slice(self) -> None:
         # 请求体用的 key = signature[24:40]，与响应 key 不是同一个
         self.assertEqual(self.SIG[24:40], "6a4060068674b6f2")
-        self.assertEqual(response_key(self.SIG).decode(), "f69b5d5cc8fa8a6c")
+        # 响应 key：sm3((sig + ":" + secret) 反转后)[24:40] 再相邻互换
+        self.assertEqual(response_key(self.SIG).decode(), "bd4d7a5ae07920a9")
         self.assertNotEqual(self.SIG[24:40], response_key(self.SIG).decode())
+
+    def test_response_key_reverses_material(self) -> None:
+        """真实服务器校准出来的：材料要先整串反转再 sm3（JS 里 P() 是空值判断，
+        永远非空，所以永远走反转那条分支）。"""
+        material = f"{self.SIG}:{API_SECRET}"
+        raw = list(sm3_hex(material[::-1])[24:40])
+        for i in range(0, len(raw) - 1, 2):
+            raw[i], raw[i + 1] = raw[i + 1], raw[i]
+        self.assertEqual(response_key(self.SIG).decode(), "".join(raw))
+        # 不反转会得到另一个 key，两者必须不同，防止有人把反转又删掉
+        unswapped = sm3_hex(material)[24:40]
+        self.assertNotEqual(unswapped, material[::-1][24:40])
 
     def test_response_roundtrip(self) -> None:
         payload = {"status": 0, "message": "ok", "data": {"lists": [{"deptCode": "123"}]}}
