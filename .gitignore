@@ -1,6 +1,8 @@
 # Local runtime config and imported authorization data.
 config.json
 config.local.json
+config.bdkq.local.json
+probe-result.json
 .hospital-register/
 .env
 .env.*
