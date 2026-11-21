@@ -255,6 +255,31 @@ textarea {
   line-height: 1.5;
 }
 
+.setup-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.setup-hint.warn {
+  color: #b45309;
+}
+
+.setup-advanced {
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+}
+
+.setup-advanced summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.setup-advanced > * + * {
+  margin-top: 8px;
+}
+
 .config-summary,
 .headers-table {
   display: grid;

@@ -1,0 +1,37 @@
+{
+  "base_url": "https://app.bdkq.mingxuan.store",
+  "tenant": "xcx-bjdxkqyy-wx",
+  "api_version": "default",
+  "resolve": {
+    "app.bdkq.mingxuan.store": "8.147.234.254"
+  },
+  "access_token": "REPLACE_WITH_ACCESS_TOKEN_FROM_HAR",
+  "referer": "https://servicewechat.com/wxf47aa38d871be854/331/page-frame.html",
+  "user_agent": "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/107.0.5304.141 Mobile Safari/537.36 XWEB/5075 MMWEBSDK/20230604 MicroMessenger/8.0.80.52(0x28005034) MiniProgramEnv/android",
+  "timeout": 8.0,
+  "tls": {
+    "ca_bundle": "",
+    "insecure_skip_verify": false
+  },
+  "target": {
+    "area_code": "0",
+    "dept_keyword": ""
+  },
+  "polling": {
+    "interval": 5,
+    "duration": 300,
+    "stop_on_hit": false
+  },
+  "notify": {
+    "enabled": false,
+    "channels": [
+      {
+        "name": "telegram",
+        "type": "telegram",
+        "enabled": true,
+        "bot_token": "REPLACE_WITH_BOT_TOKEN",
+        "chat_id": "REPLACE_WITH_CHAT_ID"
+      }
+    ]
+  }
+}

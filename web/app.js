@@ -187,7 +187,7 @@ function renderSetup() {
   $("configDetail").innerHTML = `
     <div class="config-summary">
       <span>配置文件：${escapeHtml(auth.configPath || "config.local.json")}</span>
-      <span>扫码直连：${auth.qrAuthSupported ? "已支持" : "医院未提供公开回调，暂需导入 cURL"}</span>
+      <span>扫码直连：${auth.devtoolsSupported ? "已支持（不用抓包）" : (auth.qrAuthSupported ? "已支持" : "医院未提供公开回调，暂需导入 cURL")}</span>
       <span>提交接口：${escapeHtml(state.config?.endpoints?.submit || "未配置")}</span>
       <span>就诊人编码：${state.config?.target?.patient_code && !String(state.config.target.patient_code).includes("REPLACE_") ? "已配置" : "未配置"}</span>
     </div>
@@ -566,6 +566,63 @@ function readSelectedFile(input) {
   return file.text();
 }
 
+async function loadDevtoolsStatus() {
+  const hint = $("devtoolsHint");
+  if (!hint) return;
+  try {
+    const data = await api("/api/config/devtools");
+    const info = data.devtools || {};
+    if (info.available && info.matchesTarget === false) {
+      hint.textContent =
+        `运行时里现在开着的是 ${info.appId}，不是中日友好（${info.targetAppId}）。` +
+        "这个运行时的调试通道只给第一个打开的小程序，先把中日友好打开再来。";
+      hint.classList.add("warn");
+    } else if (info.available) {
+      hint.textContent = `已连上：${info.appId || "小程序"}${
+        info.miniProgramVersion ? " v" + info.miniProgramVersion : ""
+      }，登录一次就能自动读取。`;
+      hint.classList.remove("warn");
+    } else {
+      hint.textContent = `自动读取不可用：${info.reason || "连不上小程序运行时"}，可以走下面的高级方式。`;
+      hint.classList.add("warn");
+    }
+  } catch (err) {
+    hint.textContent = `自动读取检查失败：${err.message}`;
+    hint.classList.add("warn");
+  }
+}
+
+async function importDevtools() {
+  const button = $("importDevtoolsButton");
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "读取中…";
+  try {
+    const data = await api("/api/config/import-devtools", {
+      method: "POST",
+      body: "{}",
+    });
+    state.config = data.config;
+    state.validation = data.validation || null;
+    const imported = data.imported || {};
+    const bits = [
+      `${imported.appId || "小程序"}${imported.miniProgramVersion ? " v" + imported.miniProgramVersion : ""}`,
+      `采到 ${imported.candidates} 条请求`,
+    ];
+    if (imported.userAgentFilled) bits.push("UA 已自动补齐");
+    if (imported.refererFilled) bits.push("Referer 已自动补齐");
+    if (data.validation?.message) bits.push(data.validation.message);
+    $("setupMessage").textContent = bits.join("，");
+    renderSetup();
+    await refreshAll();
+  } catch (err) {
+    $("setupMessage").textContent = `自动读取失败：${err.message}（可以展开「高级」手动导入 HAR）`;
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
 async function importHar() {
   try {
     const har = await readSelectedFile($("harInput"));
@@ -683,6 +740,7 @@ function wireEvents() {
     }
     renderSetup();
   });
+  $("importDevtoolsButton").addEventListener("click", importDevtools);
   $("importHarButton").addEventListener("click", importHar);
   $("validateAuthButton").addEventListener("click", validateAuth);
   $("importCurlButton").addEventListener("click", importCurl);
@@ -726,6 +784,7 @@ async function main() {
   wireEvents();
   try {
     await refreshAll();
+    loadDevtoolsStatus();      // 后端要连一次 adb，别挡住首屏
     startPolling();
   } catch (err) {
     const status = $("configStatus");
