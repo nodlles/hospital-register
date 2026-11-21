@@ -83,20 +83,48 @@ class BodyTest(unittest.TestCase):
         c = BysyClient(token="0123456789abcdef")
         wrapped = c.wrap_body({"flag": 2})
         self.assertIn("encrypted", wrapped)
-        self.assertEqual(len(wrapped["encrypted"]) % 32, 0)  # 16 字节 = 32 hex
+        # 服务端要 base64（源码 outputEncoding:"base64"），16 字节密文 -> 24 字符
+        import base64
+
+        raw = base64.b64decode(wrapped["encrypted"])
+        self.assertEqual(len(raw) % 16, 0)
         # 同样输入必须确定，方便以后跟真样本对比
         self.assertEqual(wrapped, c.wrap_body({"flag": 2}))
 
-    def test_wrong_key_length_refuses(self):
-        # 32 位 token 按 utf8 取不到 16 字节 -> 拒绝，而不是算出垃圾密文
-        c = BysyClient(token="0d2sF3ll2OTXOi4Qk5ol2kAKZ02sF3lG")
-        with self.assertRaises(BysyNotCalibrated):
-            c.wrap_body({"flag": 2})
+    def test_sm4_key_is_md5_of_token(self):
+        # lib/utils/sm4-crypto.js: gm.SM4.encrypt(body, md5_upper(token), {...})
+        c = BysyClient(token="0123456789abcdef")
+        self.assertEqual(by.sm4_key(c.token).hex(), by.hashlib.md5(b"0123456789abcdef").hexdigest())
+        # md5 一定是 16 字节，所以任何长度 token 都能算出合法密钥
+        self.assertEqual(len(by.sm4_key("0123456789abcdef" * 2)), 16)
+        self.assertEqual(by.sm4_key("abc").hex(), "900150983cd24fb0d6963f7d28e17f72")
 
-    def test_hex_key_encoding(self):
-        c = BysyClient(token="0123456789abcdef" * 2, sm4_key_encoding="hex")
-        self.assertEqual(len(by.sm4_key(c.token, encoding="hex")), 16)
-        self.assertIn("encrypted", c.wrap_body({}))
+    def test_response_key_iv_follow_userid_and_token_tail(self):
+        key, iv = by.response_key_iv("6b019acf47f32340f3a135cb", "X" * 140 + "E-3HZD42x8ozf7Sw")
+        self.assertEqual(key, b"6b019acf47f32340f3a135cb")
+        self.assertEqual(len(key), 24)          # 24 字节 -> AES-192
+        self.assertEqual(iv, b"E-3HZD42x8ozf7Sw")
+
+    def test_response_key_rejects_bad_lengths(self):
+        with self.assertRaises(by.BysyError):
+            by.response_key_iv("short", "X" * 32)
+        with self.assertRaises(by.BysyError):
+            by.response_key_iv("6b019acf47f32340f3a135cb", "short")
+
+    def test_decrypt_response_ignores_plaintext(self):
+        # 免登录接口回明文 JSON，不能当密文去解
+        self.assertIsNone(by.decrypt_response('{"code":"200","data":[]}', "u" * 24, "t" * 16))
+        self.assertIsNone(by.decrypt_response("", "u" * 24, "t" * 16))
+
+    def test_decrypt_response_decrypts_known_block(self):
+        # 真服务器响应的首块（所有响应开头都一样，CBC 固定 iv 导致）：
+        #   key=userId=6b019acf47f32340f3a135cb  iv=token[-16:]=E-3HZD42x8ozf7Sw
+        # 一个块不够凑 JSON，所以只验 AES-192-CBC 这一层。
+        import bysy_aes
+
+        key, iv = by.response_key_iv("6b019acf47f32340f3a135cb", "X" * 140 + "E-3HZD42x8ozf7Sw")
+        plain = bysy_aes.decrypt_hex_cbc("9C68E27FC021A2B27ADEBD50B455AF49", key, iv)
+        self.assertTrue(plain.startswith(b'{"code":"200",'), plain)
 
 
 class RequestTest(unittest.TestCase):
@@ -146,10 +174,53 @@ class RequestTest(unittest.TestCase):
         self.assertEqual(areas[0]["count"], 333)
 
 
-class UncalibratedTest(unittest.TestCase):
-    def test_schedules_refuses(self):
-        with self.assertRaises(BysyNotCalibrated):
-            BysyClient(token="0123456789abcdef").schedules()
+class SchedulesTest(unittest.TestCase):
+    def test_schedules_posts_department_id_and_parses_matrix(self):
+        payload = {
+            "code": "200",
+            "msg": "获取成功",
+            "data": [
+                {
+                    "deptName": "心血管科门诊",
+                    "hospitalName": "北京大学第三医院(本部)",
+                    "visitSchedules": [
+                        {"doctorName": "张三", "visitDate": "2026-11-23", "am_pm": "AM",
+                         "leftNum": 3, "totalNum": 40, "gh_fee": "50", "recordSn": "1|2|2026-11-23|a|"},
+                        {"doctorName": "李四", "visitDate": "2026-11-23", "am_pm": "PM",
+                         "leftNum": 0, "totalNum": 20},
+                    ],
+                }
+            ],
+        }
+        with _Recorder(payload) as rec:
+            rows = BysyClient(token="0123456789abcdef").slot_rows()
+        req = rec.requests[0]
+        self.assertIn("getVisitSchedules", req.full_url)
+        # departmentId 传空串也得带上：空 body 服务端回 []
+        import base64
+
+        from bdkq_crypto import sm4_decrypt
+
+        wire = json.loads(req.data.decode())
+        sent = json.loads(sm4_decrypt(base64.b64decode(wire["encrypted"]), by.sm4_key("0123456789abcdef")))
+        self.assertEqual(sent, {"departmentId": ""})
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["leftNum"], 3)
+        self.assertEqual(rows[0]["amPm"], "AM")
+
+    def test_slot_rows_only_available(self):
+        payload = {
+            "code": "200", "msg": "ok",
+            "data": [
+                {"deptName": "A", "visitSchedules": [
+                    {"doctorName": "x", "visitDate": "2026-11-23", "leftNum": 0},
+                    {"doctorName": "y", "visitDate": "2026-11-23", "leftNum": 2},
+                ]},
+            ],
+        }
+        with _Recorder(payload):
+            rows = BysyClient(token="0123456789abcdef").slot_rows(only_available=True)
+        self.assertEqual([r["doctorName"] for r in rows], ["y"])
 
     def test_create_appointment_refuses(self):
         with self.assertRaises(BysyNotCalibrated):

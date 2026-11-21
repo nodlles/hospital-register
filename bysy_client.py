@@ -19,8 +19,10 @@
 * token 只能用 `wx.login` 的 code **加手机号凭证**去换，
   `POST /api/v2/wx/patient/login {code, phoneCode|encryptedData+iv}`；
   只给 code 服务端明确回 `缺少手机号凭证`，且 code 单次有效。
-* 带 token 时请求体被国密封装成 `{"encrypted": SM4(JSON.stringify(body), token)}`，
-  密钥就是 token。也就是 token 既当身份又当密钥。
+* 带 token 时请求体被国密封装成
+  `{"encrypted": base64(SM4-ECB(JSON.stringify(body), md5_upper(token)))}`。
+* 响应体是一串十六进制密文，AES-192-CBC 解开后才是业务 JSON：
+  key = loginUserInfo.userId，iv = token 最后 16 个字符。见 BYSY.md「加解密」。
 
 用法（命令行走免登录那部分，不需要任何凭据）：
 
@@ -28,10 +30,13 @@
     python3 bysy_client.py depts          # 科室树（约 70KB）
     python3 bysy_client.py hot            # 热门医生
     python3 bysy_client.py probe          # 逐个打 9 个白名单接口，报告状态
+    python3 bysy_client.py slots [关键词]  # 要 token：全院八天号源，可只看有号的
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import socket
 import ssl
@@ -79,6 +84,8 @@ PATH_PAY = "api/v1/payment/createPayment"
 PATH_LOGIN = "api/v2/wx/patient/login"
 
 CODE_OK = "200"
+# 号源矩阵一次返回全院 8 天，实测 30~60s，比普通接口慢一个量级
+SCHEDULES_TIMEOUT = 120.0
 CODE_NEED_LOGIN = "201"
 
 
@@ -135,26 +142,51 @@ class BysyResponse:
         return self
 
 
-def sm4_key(token: str, *, encoding: str = "utf8") -> bytes:
+def sm4_key(token: str) -> bytes:
     """把 token 变成 SM4 的 16 字节密钥。
 
-    小程序里就是 `SM4Encrypted(JSON.stringify(body), token)`，密钥直接是 token。
-    但 token 是 32 位串时，究竟是「原始 utf8 截 16 字节」还是「hex 解成 16 字节」
-    我们没有带 token 的抓包可对，所以两种都留出来，默认 utf8，用错会在长度上炸掉，
-    不会静默算出垃圾密文。
+    源码（lib/utils/sm4-crypto.js）：
+
+        SM4Encrypted(e, r) = gm.SM4.encrypt(e || "{}", md5_upper(r),
+                            {inputEncoding: "utf8", outputEncoding: "base64"})
+
+    调用方（lib/utils/request/request.js）把 r 传成 token。`md5_upper` 就是
+    `CryptoJS.MD5(r).toString().toUpperCase()` —— 32 个十六进制字符，gm-crypto
+    按 hex 解析成 16 字节。所以密钥**不是** token 本身，也不是 token 的前 16 字节。
     """
-    if encoding == "hex":
-        key = bytes.fromhex(token)
-    elif encoding == "utf8":
-        key = token.encode("utf-8")
-    else:
-        raise ValueError(f"unknown sm4 key encoding: {encoding}")
-    if len(key) != 16:
-        raise BysyNotCalibrated(
-            f"token 按 {encoding} 解出来是 {len(key)} 字节，不是 16，"
-            "SM4 密钥推导方式还没校准（见 BYSY.md「还没校准的」）"
-        )
-    return key
+    if not token:
+        raise BysyError("没有 token，算不出 SM4 密钥")
+    digest = hashlib.md5(token.encode("utf-8")).hexdigest().upper()
+    return bytes.fromhex(digest)
+
+
+def response_key_iv(user_id: str | int, token: str) -> tuple[bytes, bytes]:
+    """响应解密的 (key, iv)，同样照抄源码 decryptAes(e, r, n)：
+    key = loginUserInfo.userId，iv = token 末 16 字符。userId 是 24 字符 -> AES-192。"""
+    key = str(user_id or "").encode("utf-8")
+    if len(key) not in (16, 24, 32):
+        raise BysyError(f"userId 长度 {len(key)} 不是 16/24/32，不是合法 AES 密钥")
+    if len(token) < 16:
+        raise BysyError(f"token 长度 {len(token)} 不足 16，截不出 iv")
+    return key, token[-16:].encode("utf-8")
+
+
+def decrypt_response(text: str, user_id: str | int, token: str) -> Any:
+    """把响应密文解成业务 JSON；不是密文（免登录接口）就返回 None。"""
+    import bysy_aes
+
+    body = (text or "").strip()
+    if not body or not all(c in "0123456789abcdefABCDEF" for c in body) or len(body) % 32:
+        return None
+    key, iv = response_key_iv(user_id, token)
+    try:
+        raw = bysy_aes.decrypt_hex_cbc(body, key, iv)
+    except (ValueError, IndexError):
+        return None
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
 
 
 class BysyClient:
@@ -169,7 +201,6 @@ class BysyClient:
         platform: str = "wechat",
         timeout: float = 15.0,
         insecure_skip_verify: bool = False,
-        sm4_key_encoding: str = "utf8",
         verbose: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -179,7 +210,6 @@ class BysyClient:
         self.version = version
         self.platform = platform
         self.timeout = timeout
-        self.sm4_key_encoding = sm4_key_encoding
         self.verbose = verbose
         self._ssl_context = None
         if insecure_skip_verify:
@@ -230,20 +260,26 @@ class BysyClient:
         return headers
 
     def wrap_body(self, body: dict[str, Any] | None, *, token: str | None = None) -> Any:
-        """有 token 时把请求体包成 {"encrypted": SM4(json, token)}。
+        """有 token 时把请求体包成 {"encrypted": base64(SM4-ECB(json, md5_upper(token)))}。
 
-        加密本身没校准（没有带 token 的样本），所以只在真的需要时才算，
-        且算之前要求 `sm4_key_encoding` 能给出 16 字节密钥。
+        没有 token 的免登录接口原样发明文，服务端两种都收（实测 200）。
         """
         payload = dict(body or {})
         tok = self.token if token is None else token
         if not tok:
             return payload
-        from bdkq_crypto import sm4_encrypt  # 复用已交叉验证过的国密实现
+        from bdkq_crypto import sm4_encrypt  # 复用已验证过的国密实现
 
         raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        key = sm4_key(tok, encoding=self.sm4_key_encoding)
-        return {"encrypted": sm4_encrypt(raw, key).hex()}
+        return {"encrypted": base64.b64encode(sm4_encrypt(raw, sm4_key(tok))).decode("ascii")}
+
+    def unwrap(self, text: str, *, token: str | None = None, user_id: str | None = None) -> Any:
+        """解开响应密文；明文响应（免登录接口）返回 None，交给 json.loads。"""
+        tok = self.token if token is None else token
+        uid = self.user_id if user_id is None else str(user_id)
+        if not tok or not uid:
+            return None
+        return decrypt_response(text, uid, tok)
 
     # ---------------------------------------------------------- 发请求
 
@@ -254,8 +290,9 @@ class BysyClient:
         *,
         token: str | None = None,
         user_id: str | None = None,
+        timeout: float | None = None,
     ) -> BysyResponse:
-        return self.request("POST", path, body=body, token=token, user_id=user_id)
+        return self.request("POST", path, body=body, token=token, user_id=user_id, timeout=timeout)
 
     def request(
         self,
@@ -265,6 +302,7 @@ class BysyClient:
         body: dict[str, Any] | None = None,
         token: str | None = None,
         user_id: str | None = None,
+        timeout: float | None = None,
     ) -> BysyResponse:
         method = method.upper()
         headers = self.build_headers(token=token, user_id=user_id)
@@ -275,7 +313,9 @@ class BysyClient:
         req = urllib.request.Request(self.url_for(path), data=data, headers=headers, method=method)
         started = time.time()
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout, context=self._ssl_context) as resp:
+            with urllib.request.urlopen(
+                req, timeout=self.timeout if timeout is None else timeout, context=self._ssl_context
+            ) as resp:
                 text = resp.read().decode("utf-8", "replace")
                 status = resp.status
                 hdrs = dict(resp.headers or {})
@@ -291,12 +331,17 @@ class BysyClient:
             hdrs = {}
         elapsed = int((time.time() - started) * 1000)
         payload: Any = None
-        try:
-            payload = json.loads(text)
-        except ValueError:
-            payload = None
+        decrypted = self.unwrap(text, token=token, user_id=user_id)
+        if decrypted is not None:
+            payload = decrypted
+        else:
+            try:
+                payload = json.loads(text)
+            except ValueError:
+                payload = None
         if self.verbose:
-            print(f"{method} {path} -> {status} {elapsed}ms {text[:200]}", file=sys.stderr)
+            shown = json.dumps(payload, ensure_ascii=False)[:200] if payload is not None else text[:200]
+            print(f"{method} {path} -> {status} {elapsed}ms {shown}", file=sys.stderr)
         return BysyResponse(
             path=path, status=status, text=text, payload=payload,
             elapsed_ms=elapsed, headers=hdrs,
@@ -385,12 +430,55 @@ class BysyClient:
             data = data.get("data")
         return data if isinstance(data, list) else []
 
-    # 号源/下单/支付：路径已知，参数与响应没校准 -> 明确拒绝，不做「大概对」的实现
-    def schedules(self, **params: Any) -> Any:
-        raise BysyNotCalibrated(
-            "api/v2/appointment/area/getVisitSchedules 的请求体字段名没校准"
-            "（需要带 token 的真实返回），见 BYSY.md「还没校准的」"
-        )
+    def schedules(self, department_id: str = "", *, timeout: float = SCHEDULES_TIMEOUT) -> list[dict[str, Any]]:
+        """**一次拿全院八天号源矩阵**。
+
+        实测（真实 token）：`api/v2/appointment/area/getVisitSchedules` 对
+        `departmentId` / `startDate` / `endDate` 一概不理，永远返回同一份
+        「276 个可挂号科室 × 8 天」的矩阵；空 body 反而返回 `[]`。所以这里
+        `department_id` 只是为了让服务端不返回空，筛选请自己在上层做。
+
+        返回结构：[{deptName, hospitalName, position, id, visitSchedules: [...]}]
+        visitSchedules 里每条的字段非常全（见 BYSY.md），关键的是：
+            leftNum   剩余号数（0 = 没号）
+            totalNum / useNum  总号数 / 已用
+            visitDate 2026-11-21、am_pm AM|PM、nightFlag
+            doctorName / doctorSn / doctor_code
+            gh_fee / registerFee 挂号费、sop_name / clinicName 号别名称
+            recordSn  下单时要回传的排班标识
+        """
+        # 这份矩阵一次就是全院八天号源，服务端 30~60s 才回，默认 15s 超时根本不够
+        res = self.post(PATH_SCHEDULES, {"departmentId": str(department_id)}, timeout=timeout)
+        data = res.ensure_ok("getVisitSchedules").data
+        return data if isinstance(data, list) else []
+
+    def slot_rows(
+        self, *, only_available: bool = False, timeout: float = SCHEDULES_TIMEOUT
+    ) -> list[dict[str, Any]]:
+        """把号源矩阵摊平成一行一个号（科室+医生+日期+午别），便于筛选。"""
+        rows: list[dict[str, Any]] = []
+        for dept in self.schedules(timeout=timeout):
+            for s in dept.get("visitSchedules") or []:
+                left = int(s.get("leftNum") or 0)
+                if only_available and left <= 0:
+                    continue
+                rows.append({
+                    "deptName": dept.get("deptName") or s.get("deptName"),
+                    "hospitalName": dept.get("hospitalName") or s.get("hospitalName"),
+                    "doctorName": s.get("doctorName"),
+                    "doctorSn": s.get("doctorSn"),
+                    "visitDate": s.get("visitDate"),
+                    "amPm": s.get("am_pm") or s.get("amPm"),
+                    "leftNum": left,
+                    "totalNum": s.get("totalNum"),
+                    "fee": s.get("gh_fee") or s.get("registerFee"),
+                    "sopName": s.get("sop_name") or s.get("sopName"),
+                    "recordSn": s.get("recordSn"),
+                    "scheduleId": s.get("_id") or s.get("id"),
+                    "nightFlag": s.get("nightFlag"),
+                    "isStopVisit": s.get("isStopVisit"),
+                })
+        return rows
 
     def create_appointment(self, **params: Any) -> Any:
         raise BysyNotCalibrated(
@@ -410,6 +498,8 @@ def _load_endpoints() -> dict[str, Any]:
 
 
 def main(argv: list[str]) -> int:
+    from pathlib import Path
+
     cmd = (argv[1] if len(argv) > 1 else "areas").strip()
     client = BysyClient(verbose=False)
     if cmd == "areas":
@@ -427,6 +517,23 @@ def main(argv: list[str]) -> int:
         print(f"{len(docs)} 位医生")
         for d in docs[:20]:
             print(d.get("doctorSn"), d.get("doctorName"), d.get("title"))
+        return 0
+    if cmd == "slots":
+        cfg_path = Path(__file__).with_name("config.json")
+        if not cfg_path.exists():
+            print("需要 config.json 里的 bysy.token 才能查号源")
+            return 2
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8")).get("bysy") or {}
+        client = BysyClient.from_config(cfg)
+        if not client.logged_in:
+            print("config.json 里没有 bysy.token")
+            return 2
+        kw = argv[2] if len(argv) > 2 else ""
+        rows = [r for r in client.slot_rows(only_available=True) if not kw or kw in (r["deptName"] or "")]
+        print(f"{len(rows)} 个有号时段")
+        for r in rows:
+            print(f"{r['visitDate']} {r['amPm']}\t{r['hospitalName']}\t{r['deptName']}\t"
+                  f"{r['doctorName']}\t余{r['leftNum']}/{r['totalNum']}\t{r['fee']}元")
         return 0
     if cmd == "probe":
         bodies = {
@@ -454,7 +561,7 @@ def main(argv: list[str]) -> int:
         print(f"{res.status} code={res.code} {res.msg}")
         return 0 if res.ok else 1
     print(__doc__)
-    print("可用命令: areas | depts | hot | probe | check-auth")
+    print("可用命令: areas | depts | hot | probe | check-auth | slots")
     return 2
 
 
