@@ -1,0 +1,1036 @@
+{
+ "_meta": {
+  "hospital": "北京大学第三医院",
+  "appid": "wx3302a1b5a5f91dc4",
+  "appVersion": "2.2.2",
+  "baseUrl": "https://patwx.puh3.net.cn",
+  "source": "运行时 DevTools 取到的小程序 app-service.js（scriptId 149，1941211 字节）逆向",
+  "tokenRule": "请求包装 lib/utils/request：不在下面 public 白名单里的接口都必须带 token/userId，实测无 token 返回 {\"code\":\"201\"}",
+  "whitelistFrom": "app-service.js 里的 d=[...] 数组（原始顺序，9 条）"
+ },
+ "public": {
+  "departmentList": {
+   "path": "api/v1/doctor/departmentList",
+   "method": "post",
+   "token": false
+  },
+  "departmentItem": {
+   "path": "api/v1/doctor/departmentItem",
+   "method": "post",
+   "token": false
+  },
+  "departmentGetDepartments": {
+   "path": "api/v1/department/getDepartments",
+   "method": "post",
+   "token": false
+  },
+  "departmentGetDoctors": {
+   "path": "api/v1/doctor/department/getDoctors",
+   "method": "post",
+   "token": false
+  },
+  "newGetDoctors": {
+   "path": "api/v1/doctor/new/getDoctors",
+   "method": "post",
+   "token": false
+  },
+  "getEvaluates": {
+   "path": "api/v1/wx/evaluate/getEvaluates",
+   "method": "post",
+   "token": false
+  },
+  "doctorHasDiagnoses": {
+   "path": "api/v1/consultation/patient/doctorHasDiagnoses",
+   "method": "post",
+   "token": false
+  },
+  "getHospitalAreas": {
+   "path": "api/v1/appointment/getHospitalAreas",
+   "method": "post",
+   "token": false
+  },
+  "freeDepartmentList": {
+   "path": "api/v1/patient/free/department/list",
+   "method": "post",
+   "token": false
+  }
+ },
+ "auth": {
+  "getDepartments": {
+   "path": "api/v1/appointment/getDepartments",
+   "method": "post",
+   "token": true
+  },
+  "getDepartmentDoctors": {
+   "path": "api/v2/appointment/getDepartmentDoctors",
+   "method": "post",
+   "token": true
+  },
+  "queryDoctorsByDate": {
+   "path": "api/v2/doctor/department/getSearchDoctorsByDate",
+   "method": "post",
+   "token": true
+  },
+  "querySchedules": {
+   "path": "api/v2/appointment/area/getVisitSchedules",
+   "method": "post",
+   "token": true
+  },
+  "queryScheduleTimes": {
+   "path": "api/v2/appointment/getVisitSchedulesTimes",
+   "method": "post",
+   "token": true
+  },
+  "checkAllowedWaitingAppointment": {
+   "path": "api/v1/waiting/checkAllowedWaitingAppointment",
+   "method": "post",
+   "token": true
+  },
+  "addAppointment": {
+   "path": "api/v2/appointment/createAppointment",
+   "method": "post",
+   "token": true
+  },
+  "createAppointmentPayment": {
+   "path": "api/v1/payment/createPayment",
+   "method": "post",
+   "token": true
+  },
+  "afterQueryHisOrderStatus": {
+   "path": "api/v1/appointment/afterQueryHisOrderStatus",
+   "method": "post",
+   "token": true
+  },
+  "checkAppointmentPayment": {
+   "path": "api/v1/appointment/checkAppointmentPayment",
+   "method": "post",
+   "token": true
+  },
+  "appointmentRecord": {
+   "path": "api/v1/appointment/AppointmentRecord",
+   "method": "post",
+   "token": true
+  },
+  "cancelAppointmentPatient": {
+   "path": "api/v1/appointment/cancelAppointmentByPatient",
+   "method": "post",
+   "token": true
+  },
+  "queryAppointments": {
+   "path": "api/v1/appointment/wx/unPay/ghRecords",
+   "method": "post",
+   "token": true
+  },
+  "cancelAppointmentByPatient": {
+   "path": "api/v1/appointment/cancelAppointmentByPatient",
+   "method": "post",
+   "token": true
+  },
+  "cancelAppointmentOther": {
+   "path": "api/v1/appointment/his/cancelAppointment",
+   "method": "post",
+   "token": true
+  },
+  "cancelDoctorAppointment": {
+   "path": "api/v1/appointment/cancelAddAppointmentByPatient",
+   "method": "post",
+   "token": true
+  },
+  "getYbEncryptRefundAuthCode": {
+   "path": "api/v1/yb/getYbEncryptRefundAuthCode",
+   "method": "post",
+   "token": true
+  },
+  "waitingAppointment": {
+   "path": "api/v1/waiting/appointment",
+   "method": "post",
+   "token": true
+  },
+  "waitingAppointmentList": {
+   "path": "api/v1/waiting/appointmentList",
+   "method": "post",
+   "token": true
+  },
+  "waitingAppointmentCancel": {
+   "path": "api/v1/waiting/cancelWaitingAppointment",
+   "method": "post",
+   "token": true
+  },
+  "getFilmList": {
+   "path": "api/v2/patient/mz/filmList",
+   "method": "post",
+   "token": true
+  },
+  "supplyFilm": {
+   "path": "api/v2/patient/mz/supplyFilm",
+   "method": "post",
+   "token": true
+  },
+  "getMzPrescription": {
+   "path": "api/v2/manager/mz/getMzPrescription",
+   "method": "post",
+   "token": true
+  },
+  "getMzPrescriptionInfo": {
+   "path": "api/v2/manager/mz/getMzPrescriptionInfo",
+   "method": "post",
+   "token": true
+  },
+  "sendMzPrescriptionSF": {
+   "path": "api/v2/manager/mz/sendMzPrescriptionSF",
+   "method": "post",
+   "token": true
+  },
+  "queryCloudDoctorsByDate": {
+   "path": "api/v1/cloudConsultation/consultationSourceByDate",
+   "method": "post",
+   "token": true
+  },
+  "queryCloudSchedules": {
+   "path": "api/v1/cloudConsultation/consultationSourceByDoctorSn",
+   "method": "post",
+   "token": true
+  },
+  "queryCloudScheduleTimes": {
+   "path": "api/v1/cloudConsultation/consultationSourceVisitScheduleTime",
+   "method": "post",
+   "token": true
+  },
+  "createCloudConsultationOrder": {
+   "path": "api/v1/cloudConsultation/createCloudConsultationOrder",
+   "method": "post",
+   "token": true
+  },
+  "cloudSelectYb": {
+   "path": "api/v1/cloudConsultation/selectYb",
+   "method": "post",
+   "token": true
+  },
+  "cloudYbDivide": {
+   "path": "api/v1/cloudConsultation/yb/divide",
+   "method": "post",
+   "token": true
+  },
+  "asyncCloudAppointment": {
+   "path": "api/v1/cloudConsultation/asyncCloudAppointment",
+   "method": "post",
+   "token": true
+  },
+  "divideAppointment": {
+   "path": "api/v1/cloudConsultation/divideAppointment",
+   "method": "post",
+   "token": true
+  },
+  "cloudReport": {
+   "path": "api/v1/cloudConsultation/report",
+   "method": "post",
+   "token": true
+  },
+  "checkPayOrder": {
+   "path": "api/v1/cloudConsultation/checkPayOrder",
+   "method": "post",
+   "token": true
+  },
+  "cancelCloudAppointment": {
+   "path": "api/v1/cloudConsultation/cancelCloudAppointment",
+   "method": "post",
+   "token": true
+  },
+  "sendCancelCloudAppointmentNoteMessage": {
+   "path": "api/v1/cloudConsultation/sendCancelCloudAppointmentNoteMessage",
+   "method": "post",
+   "token": true
+  },
+  "queryMobilePremium": {
+   "path": "api/v1/yb/getYbEncryptRefundAuthCode",
+   "method": "post",
+   "token": true
+  },
+  "queryCloudWaitingInfo": {
+   "path": "api/v1/cloudConsultation/rank",
+   "method": "post",
+   "token": true
+  },
+  "getIsOpenPhone": {
+   "path": "api/v1/cloudConsultation/getIsOpenPhone",
+   "method": "post",
+   "token": true
+  },
+  "sendNoteMessage": {
+   "path": "api/v1/cloudConsultation/sendNoteMessage",
+   "method": "post",
+   "token": true
+  },
+  "readMessage": {
+   "path": "api/v1/cloudConsultation/readMessage",
+   "method": "post",
+   "token": true
+  },
+  "noteMessageList": {
+   "path": "api/v1/cloudConsultation/noteMessageList",
+   "method": "post",
+   "token": true
+  },
+  "visited": {
+   "path": "api/v1/cloudConsultation/visited",
+   "method": "post",
+   "token": true
+  },
+  "getCloudDoctorDetail": {
+   "path": "api/v1/cloudConsultation/getDoctorDetail",
+   "method": "post",
+   "token": true
+  },
+  "getJiaHeSymptomCloudToken": {
+   "path": "api/v1/preConsultation/cloud/getSymptomToken",
+   "method": "post",
+   "token": true
+  },
+  "offlineCloudConsultationRecord": {
+   "path": "api/v1/appointment/offline/cloudConsultationRecord",
+   "method": "post",
+   "token": true
+  },
+  "createOfflineCloudConsultationOrder": {
+   "path": "api/v1/appointment/offline/createCloudConsultationOrder",
+   "method": "post",
+   "token": true
+  },
+  "getZlOrder": {
+   "path": "api/v1/doctor/jc/getZlOrder",
+   "method": "post",
+   "token": true
+  },
+  "queryOperation": {
+   "path": "api/v1/patient/get/doctorOperation",
+   "method": "post",
+   "token": true
+  },
+  "getPatientIsZy": {
+   "path": "api/v1/zy/getPatientIsZy",
+   "method": "post",
+   "token": true
+  },
+  "getHospRegisterCode": {
+   "path": "api/v1/yb/getHospRegisterCode",
+   "method": "post",
+   "token": true
+  },
+  "getCySettlementCode": {
+   "path": "api/v1/yb/getCySettlementCode",
+   "method": "post",
+   "token": true
+  },
+  "getPatientYbzzRecord": {
+   "path": "api/v1/zy/getPatientYbzzRecord",
+   "method": "post",
+   "token": true
+  },
+  "getPatientZytimesQueryCard": {
+   "path": "api/v1/zy/getPatientZytimesQueryCard",
+   "method": "post",
+   "token": true
+  },
+  "getPatientZytimesQuery": {
+   "path": "api/v1/zy/getPatientZytimesQuery",
+   "method": "post",
+   "token": true
+  },
+  "getPayZyOrder": {
+   "path": "api/v1/zy/payZyOrder/List",
+   "method": "post",
+   "token": true
+  },
+  "queryOuthosDrug": {
+   "path": "api/v1/patient/info/leaveHospitalTakeDrugs",
+   "method": "post",
+   "token": true
+  },
+  "queryInpatientNoticeList": {
+   "path": "api/v1/zy/applyOrderList",
+   "method": "post",
+   "token": true
+  },
+  "inpatientApplyOrder": {
+   "path": "api/v1/zy/applyOrder",
+   "method": "post",
+   "token": true
+  },
+  "inpatientRegistration": {
+   "path": "api/v1/zy/zyPreApplyOrder",
+   "method": "post",
+   "token": true
+  },
+  "inpatientGetRegistration": {
+   "path": "api/v1/zy/getZyPreApplyOrder",
+   "method": "post",
+   "token": true
+  },
+  "queryDailyfeeDetail": {
+   "path": "api/v1/zy/zyPayDetail",
+   "method": "post",
+   "token": true
+  },
+  "queryZyFeeTotal": {
+   "path": "api/v1/zy/zyFeeTotal",
+   "method": "post",
+   "token": true
+  },
+  "inpatientGetZYZD": {
+   "path": "api/v1/zy/getZYZD",
+   "method": "post",
+   "token": true
+  },
+  "createPayZyOrder": {
+   "path": "api/v1/zy/payZyOrder",
+   "method": "post",
+   "token": true
+  },
+  "inHospitalProvinceAndCityList": {
+   "path": "api/v1/zy/getProvinceAndCityList",
+   "method": "post",
+   "token": true
+  },
+  "getZyOrder": {
+   "path": "api/v1/doctor/jc/getZyOrder",
+   "method": "post",
+   "token": true
+  },
+  "drugGuide": {
+   "path": "api/v2/patient/mz/drugGuide",
+   "method": "post",
+   "token": true
+  },
+  "getPreparationDrugList": {
+   "path": "api/v1/prescribe/drugLists",
+   "method": "post",
+   "token": true
+  },
+  "getPreparationDetail": {
+   "path": "api/v1/prescribe/getPrescriptionDetail",
+   "method": "post",
+   "token": true
+  },
+  "getExaminationsUrl": {
+   "path": "api/v1/jc/reservationH5",
+   "method": "post",
+   "token": true
+  },
+  "getZhuanjiaSearchDoctors": {
+   "path": "api/v1/doctor/homepage/searchDoctors",
+   "method": "post",
+   "token": true
+  },
+  "getDoctorHomeInfo": {
+   "path": "api/v1/doctor/homepage/doctorInfo",
+   "method": "post",
+   "token": true
+  },
+  "getDoctorHomeVisit": {
+   "path": "api/v1/doctor/homepage/getDoctorVisit",
+   "method": "post",
+   "token": true
+  },
+  "getUserHasDoctors": {
+   "path": "api/v1/user/getUserHasDoctors",
+   "method": "post",
+   "token": true
+  },
+  "collectDoctor": {
+   "path": "api/v1/user/createUserHasDoctor",
+   "method": "post",
+   "token": true
+  },
+  "removeDoctorCollect": {
+   "path": "api/v1/doctor/homepage/removeCollect",
+   "method": "post",
+   "token": true
+  },
+  "getAllDepartmentDoctorList": {
+   "path": "api/v1/doctor/getDepartmentItemAllDoctor",
+   "method": "post",
+   "token": true
+  },
+  "getFaceToken": {
+   "path": "api/v1/wx/face/token",
+   "method": "post",
+   "token": true
+  },
+  "queryFaceVerifyInfo": {
+   "path": "api/v1/check/patientFace",
+   "method": "post",
+   "token": true
+  },
+  "createPatientByHis": {
+   "path": "api/v1/wx/patient/createPatientByHis",
+   "method": "post",
+   "token": true
+  },
+  "createBabyPatient": {
+   "path": "api/v1/patient/addBabyPatient",
+   "method": "post",
+   "token": true
+  },
+  "getDoctorInfo": {
+   "path": "api/v1/doctor/getDoctor",
+   "method": "post",
+   "token": true
+  },
+  "getConsultationPurpose": {
+   "path": "api/v1/consultation/patient/consultationPurposes",
+   "method": "post",
+   "token": true
+  },
+  "getdiagnosisList": {
+   "path": "api/v1/consultation/patient/getDiagnosises",
+   "method": "post",
+   "token": true
+  },
+  "getDiseaseList": {
+   "path": "api/v1/consultation/patient/getDiagnosises",
+   "method": "post",
+   "token": true
+  },
+  "getQiniuUpToken": {
+   "path": "api/v1/save/getUploadToken",
+   "method": "post",
+   "token": true
+  },
+  "createConsultOrder": {
+   "path": "api/v1/consultation/patient/createConsultation",
+   "method": "post",
+   "token": true
+  },
+  "handleConsultOrderFree": {
+   "path": "api/v1/consultation/free",
+   "method": "post",
+   "token": true
+  },
+  "getNationalityOrArea": {
+   "path": "api/v2/person/patient/getNationalityOrArea",
+   "method": "post",
+   "token": true
+  },
+  "updatePatientNationalityOrArea": {
+   "path": "api/v2/person/patient/updatePatientNationalityOrArea",
+   "method": "post",
+   "token": true
+  },
+  "checkOrderStatus": {
+   "path": "api/v3/consultation/patient/checkOrderStatus",
+   "method": "post",
+   "token": true
+  },
+  "createOldConsultation": {
+   "path": "api/v1/consultation/patient/createOldConsultation",
+   "method": "post",
+   "token": true
+  },
+  "resetConsultation": {
+   "path": "api/v1/consultation/patient/resetConsultation",
+   "method": "post",
+   "token": true
+  },
+  "checkOrderConArguStatus": {
+   "path": "api/v3/consultation/patient/checkOrderConsultationArgumentStatus",
+   "method": "post",
+   "token": true
+  },
+  "getConsultOrderList": {
+   "path": "api/v3/consultation/getConsultations",
+   "method": "post",
+   "token": true
+  },
+  "getConsultOrderInfo": {
+   "path": "api/v3/consultation/patient/getConsultationsDetail",
+   "method": "post",
+   "token": true
+  },
+  "cancelConsultOrder": {
+   "path": "api/v1/consultation/patient/cancelConsultation",
+   "method": "post",
+   "token": true
+  },
+  "closeConsultOrder": {
+   "path": "api/v1/consultation/patient/closeConsultation",
+   "method": "post",
+   "token": true
+  },
+  "consultCreatePayment": {
+   "path": "api/v1/payment/createPayment",
+   "method": "post",
+   "token": true
+  },
+  "getBannerList": {
+   "path": "api/v1/banner/list",
+   "method": "post",
+   "token": true
+  },
+  "consultPayStatus": {
+   "path": "api/v3/consultation/checkConsultationPayment",
+   "method": "post",
+   "token": true
+  },
+  "getChatInfo": {
+   "path": "api/v3/consultation/patient/getConsultationsDetail",
+   "method": "post",
+   "token": true
+  },
+  "getMessageList": {
+   "path": "api/v3/chat/getMessages",
+   "method": "post",
+   "token": true
+  },
+  "createChatMessage": {
+   "path": "api/v3/chat/createChatMessage",
+   "method": "post",
+   "token": true
+  },
+  "getUnReadCount": {
+   "path": "api/v3/chat/chatMessage/user/unReadCount",
+   "method": "post",
+   "token": true
+  },
+  "setMegReading": {
+   "path": "api/v3/chat/chatMessage/user/reading",
+   "method": "post",
+   "token": true
+  },
+  "getNewSystemChats": {
+   "path": "api/v4/chat/getSystemChats",
+   "method": "post",
+   "token": true
+  },
+  "queryMessageList": {
+   "path": "api/v3/chat/getSystemChats",
+   "method": "post",
+   "token": true
+  },
+  "setSystemMessagePermission": {
+   "path": "api/v4/chat/setSystemMessagePermission",
+   "method": "post",
+   "token": true
+  },
+  "getSystemChatsFormKinds": {
+   "path": "api/v4/chat/getSystemChatsFormKinds",
+   "method": "post",
+   "token": true
+  },
+  "getHistorySystemChatsFormKinds": {
+   "path": "api/v3/chat/getSystemChatsFormKinds",
+   "method": "post",
+   "token": true
+  },
+  "getAppointmentDetail": {
+   "path": "api/v1/appointment/getAppointmentDetail",
+   "method": "post",
+   "token": true
+  },
+  "getPrescriptionList": {
+   "path": "api/v1/consultation/patient/prescriptionsLPatientLists",
+   "method": "post",
+   "token": true
+  },
+  "getPrescriptionInfo": {
+   "path": "api/v1/patient/getPrescriptionDetail",
+   "method": "post",
+   "token": true
+  },
+  "getDrugInstruction": {
+   "path": "api/v1/prescription/drug/getDrugInstruction",
+   "method": "post",
+   "token": true
+  },
+  "getPrescriptionPayedInfo": {
+   "path": "api/v1/patient/getPrescriptionPayedOrder",
+   "method": "post",
+   "token": true
+  },
+  "getAddressList": {
+   "path": "api/v1/address/getAddressList",
+   "method": "post",
+   "token": true
+  },
+  "createAddress": {
+   "path": "api/v1/address/createAddress",
+   "method": "post",
+   "token": true
+  },
+  "updateAddress": {
+   "path": "api/v1/address/updateAddress",
+   "method": "post",
+   "token": true
+  },
+  "deleteAddress": {
+   "path": "api/v1/address/deleteAddress",
+   "method": "post",
+   "token": true
+  },
+  "getAreaList": {
+   "path": "api/v1/address/getProvince",
+   "method": "post",
+   "token": true
+  },
+  "getAskBobUrl": {
+   "path": "api/v1/askBob/geturl",
+   "method": "post",
+   "token": true
+  },
+  "getLogisticInfo": {
+   "path": "api/v1/patient/getPrescriptionOrderDetail",
+   "method": "post",
+   "token": true
+  },
+  "verifyDelivery": {
+   "path": "api/v1/patient/verifyDelivery",
+   "method": "post",
+   "token": true
+  },
+  "createPaymentPrescription": {
+   "path": "api/v2/patient/mz/payPrescriptionCharge",
+   "method": "post",
+   "token": true
+  },
+  "logisticsInfo": {
+   "path": "api/v1/sf/sfPreRouter",
+   "method": "post",
+   "token": true
+  },
+  "prescriptionPayStatus": {
+   "path": "api/v3/consultation/checkPrescriptionPayment",
+   "method": "post",
+   "token": true
+  },
+  "getGuide": {
+   "path": "api/v1/guide/getGuide",
+   "method": "post",
+   "token": true
+  },
+  "getOutpatientUnpaidList": {
+   "path": "api/v2/patient/mz/getChargeDetailAndTimes",
+   "method": "post",
+   "token": true
+  },
+  "getOutpatientPaidList": {
+   "path": "api/v2/patient/mz/getMzPayLists",
+   "method": "post",
+   "token": true
+  },
+  "getQuestionList": {
+   "path": "api/v1/askedQuestion/list",
+   "method": "post",
+   "token": true
+  },
+  "getHospitalsInfo": {
+   "path": "api/v2/account/getHospitals",
+   "method": "post",
+   "token": true
+  },
+  "getElectronicInvoices": {
+   "path": "api/v1/consultation/patient/getElectronicInvoices",
+   "method": "post",
+   "token": true
+  },
+  "getYbEncryptAuthCode": {
+   "path": "api/v1/yb/getYbEncryptAuthCode",
+   "method": "post",
+   "token": true
+  },
+  "createConsultationIssue": {
+   "path": "api/v1/patient/invoiceBeforeGetTrans",
+   "method": "post",
+   "token": true
+  },
+  "getGuideList": {
+   "path": "api/v1/guide/getAllGuide",
+   "method": "post",
+   "token": true
+  }
+ },
+ "unnamed": [
+  {
+   "path": "api/v1/114/geturl",
+   "token": true
+  },
+  {
+   "path": "api/v1/appConfig/getThemeImageUrl",
+   "token": true
+  },
+  {
+   "path": "api/v1/appointment/cloudConsultationRecord",
+   "token": true
+  },
+  {
+   "path": "api/v1/cloudConsultation/consultationSource",
+   "token": true
+  },
+  {
+   "path": "api/v1/cloudConsultation/consultationSourceDepartments",
+   "token": true
+  },
+  {
+   "path": "api/v1/cloudConsultation/freeEmployeeMz",
+   "token": true
+  },
+  {
+   "path": "api/v1/cloudConsultation/payCloudConsultationOrder/wechat",
+   "token": true
+  },
+  {
+   "path": "api/v1/consultation/getVisitedDepartments",
+   "token": true
+  },
+  {
+   "path": "api/v1/consultation/history/getVisitedDepartments",
+   "token": true
+  },
+  {
+   "path": "api/v1/consultation/patient/consultationReasons",
+   "token": true
+  },
+  {
+   "path": "api/v1/consultation/patient/createConsultationArgument",
+   "token": true
+  },
+  {
+   "path": "api/v1/consultation/patient/doctorHasDiagnoses",
+   "token": false
+  },
+  {
+   "path": "api/v1/consultation/patient/getConsultationArgument",
+   "token": true
+  },
+  {
+   "path": "api/v1/consultation/patient/getEvaluateQuesions",
+   "token": true
+  },
+  {
+   "path": "api/v1/consultation/patient/getOutDiagnosis",
+   "token": true
+  },
+  {
+   "path": "api/v1/consultation/patient/updateConsultationArgument",
+   "token": true
+  },
+  {
+   "path": "api/v1/consultation/queueCardList",
+   "token": true
+  },
+  {
+   "path": "api/v1/consultation/queueCardManageList",
+   "token": true
+  },
+  {
+   "path": "api/v1/consultations/consultationsArgument",
+   "token": true
+  },
+  {
+   "path": "api/v1/datacenter/services/oauth/token",
+   "token": true
+  },
+  {
+   "path": "api/v1/department/getDepartmentDetail",
+   "token": true
+  },
+  {
+   "path": "api/v1/department/getDepartments",
+   "token": false
+  },
+  {
+   "path": "api/v1/doctor/department/getDoctors",
+   "token": false
+  },
+  {
+   "path": "api/v1/doctor/departmentItem",
+   "token": false
+  },
+  {
+   "path": "api/v1/doctor/getNewMedicalList",
+   "token": true
+  },
+  {
+   "path": "api/v1/doctor/getNewMedicalPDF",
+   "token": true
+  },
+  {
+   "path": "api/v1/doctor/jc/getJcDetail",
+   "token": true
+  },
+  {
+   "path": "api/v1/doctor/jy/getJyDetail",
+   "token": true
+  },
+  {
+   "path": "api/v1/doctor/new/getDoctors",
+   "token": false
+  },
+  {
+   "path": "api/v1/doctors/recommend",
+   "token": true
+  },
+  {
+   "path": "api/v1/evaluate/createEvaluate",
+   "token": true
+  },
+  {
+   "path": "api/v1/feedback/patient/createFeedback",
+   "token": true
+  },
+  {
+   "path": "api/v1/feedback/patient/getFeedbacks",
+   "token": true
+  },
+  {
+   "path": "api/v1/gm/getJT/consultation/chat",
+   "token": true
+  },
+  {
+   "path": "api/v1/gm/getJT/consultation/detail",
+   "token": true
+  },
+  {
+   "path": "api/v1/gm/getJT/consultation/init",
+   "token": true
+  },
+  {
+   "path": "api/v1/gm/getJT/getPatientInfo",
+   "token": true
+  },
+  {
+   "path": "api/v1/patient/free/department/list",
+   "token": false
+  },
+  {
+   "path": "api/v1/preConsultation/getSymptomToken",
+   "token": true
+  },
+  {
+   "path": "api/v1/prescribe/checkPrescribe",
+   "token": true
+  },
+  {
+   "path": "api/v1/prescribe/createConsultationAndPrescription",
+   "token": true
+  },
+  {
+   "path": "api/v1/question/patient/getExaminationDetail",
+   "token": true
+  },
+  {
+   "path": "api/v1/question/patient/getExaminations",
+   "token": true
+  },
+  {
+   "path": "api/v1/question/patient/getExaminationsBl",
+   "token": true
+  },
+  {
+   "path": "api/v1/question/patient/getLaboratoryDetail",
+   "token": true
+  },
+  {
+   "path": "api/v1/question/patient/getLaboratorys",
+   "token": true
+  },
+  {
+   "path": "api/v1/save/getCosKey",
+   "token": true
+  },
+  {
+   "path": "api/v1/sf/addSingleOrder",
+   "token": true
+  },
+  {
+   "path": "api/v1/system/getSystemTime",
+   "token": true
+  },
+  {
+   "path": "api/v1/wx/evaluate/getEvaluates",
+   "token": false
+  },
+  {
+   "path": "api/v1/wx/face/certificate",
+   "token": true
+  },
+  {
+   "path": "api/v1/wx/login/wechat",
+   "token": true
+  },
+  {
+   "path": "api/v1/wx/login/wechat/phone",
+   "token": true
+  },
+  {
+   "path": "api/v1/yb/CYJS02",
+   "token": true
+  },
+  {
+   "path": "api/v1/yb/ZYDJ02",
+   "token": true
+  },
+  {
+   "path": "api/v2/account/createVerifyCode",
+   "token": true
+  },
+  {
+   "path": "api/v2/account/logoutAccount",
+   "token": true
+  },
+  {
+   "path": "api/v2/patient/addGuardian",
+   "token": true
+  },
+  {
+   "path": "api/v2/patient/getPatientInfo",
+   "token": true
+  },
+  {
+   "path": "api/v2/patient/mz/checkMZChargePayResult",
+   "token": true
+  },
+  {
+   "path": "api/v2/patient/mz/getChargeDetail",
+   "token": true
+  },
+  {
+   "path": "api/v2/patient/mz/getMzPayListsDetail",
+   "token": true
+  },
+  {
+   "path": "api/v2/patient/mz/payMZCharge",
+   "token": true
+  },
+  {
+   "path": "api/v2/patient/removePatient",
+   "token": true
+  },
+  {
+   "path": "api/v2/person/patient/patientManager",
+   "token": true
+  },
+  {
+   "path": "api/v2/wx/patient/getPatientInfoForWx",
+   "token": true
+  },
+  {
+   "path": "api/v2/wx/patient/login",
+   "token": true
+  },
+  {
+   "path": "api/v2/wxOrzfb/resetToken",
+   "token": true
+  },
+  {
+   "path": "api/v3/chat/patient/getChatList",
+   "token": true
+  },
+  {
+   "path": "api/v3/consultation/items",
+   "token": true
+  },
+  {
+   "path": "api/v3/mz/checkMzPayment",
+   "token": true
+  }
+ ]
+}

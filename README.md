@@ -58,6 +58,16 @@ python3 app_server.py
 北大口腔那条路更省事：直接在逻辑层调 `wx.login()` 拿 code，自己换 token，
 `access_token` 到期前会自动续，配置里连 token 都不用写。
 
+北医三院是第三家：它的号源接口全要 token，而 token 只能拿「手机号凭证」换，
+所以这一家先做到免登录那 9 个白名单接口——院区、科室、医生、评价都能直连拿到，
+客户端和协议细节单独写在 [`BYSY.md`](BYSY.md) 里，代码是 `bysy_client.py`：
+
+```bash
+python3 bysy_client.py areas     # 七个院区的当前号源数
+python3 bysy_client.py depts     # 科室树
+python3 bysy_client.py hot       # 热门医生
+```
+
 读取后服务会自动提取：
 
 - `base_url`
