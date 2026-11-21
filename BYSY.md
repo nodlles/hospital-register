@@ -163,7 +163,7 @@ ndyfy-master-system           {version:"2.2.2", platform:"wechat", system:"17", 
 | `api/v1/system/getSystemTime` `{}` | 200，`{"systemTime":"2026-11-21"}`，426ms |
 | `api/v1/appointment/getDepartments` `{"isShow":true,"isAffiliated":true}` | 200，**664 个科室**（带 hospitalName / isAppointment / deptSn），14s |
 | `api/v2/appointment/getDepartmentDoctors` 见下 | 200，「获取医生列表成功V2」，**57 位医生** |
-| `api/v2/appointment/area/getVisitSchedules` `{"departmentId":<任意>` | 200，**276 个科室 × 8 天**号源矩阵 |
+| `api/v2/appointment/area/getVisitSchedules` `{"departmentId":<真实科室 _id>}` | 200，**100s / 10.9 MB / 276 个科室 / 4242 条排班** |
 
 `getDepartmentDoctors` 的请求体（源码调用点原样，已实测字段全对）：
 
@@ -177,9 +177,14 @@ ndyfy-master-system           {version:"2.2.2", platform:"wechat", system:"17", 
 
 ### 号源矩阵（`getVisitSchedules`）的坑
 
-* **`departmentId` / `startDate` / `endDate` 服务端一概不理**：传什么都是同一份
-  「276 科室 × 8 天」全量矩阵；**空 body 反而回 `[]`**。所以 `schedules()` 固定带一个
-  `departmentId`（可空串），筛选全部自己做。
+* **必须是真实科室 `_id`**：传真实 id 才是那份「276 科室 × 8 天」全量矩阵；换任意
+  一个真实 id 结果都一样（服务端只拿它认路，不拿它筛，`startDate`/`endDate` 同样不理）。
+* **假 id / 空串会让服务端一直算不回来**：`{"departmentId":"x"}` 实测 600s 都没响应
+  （连响应头都不到），空 body 则直接回 `[]`。所以 `schedules()` 留空时先打
+  `getDepartments` 自动挑一个 `isAppointment:true` 的 `_id` 当锚点并缓存
+  （`_schedule_anchor()`），别自己传空值。
+* **一次 10.9 MB、约 100s**：默认超时给到 300s（`SCHEDULES_TIMEOUT`），别用普通接口的
+  15s；解析后筛选（`slot_rows()`）全部在客户端做。
 * 一次请求就有全院号源，**监控只需要打这一个接口**。
 * 每条排班的关键字段：
 

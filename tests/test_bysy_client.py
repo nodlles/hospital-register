@@ -29,7 +29,8 @@ class _FakeResponse:
 class _Recorder:
     """替掉 urllib.request.urlopen，记下请求，回固定 JSON。"""
 
-    def __init__(self, payload: dict) -> None:
+    def __init__(self, payload) -> None:
+        # payload 可以是 dict，也可以是 url -> dict 的函数（多处请求时按 url 分流）
         self.payload = payload
         self.requests = []
         self._real = None
@@ -45,7 +46,8 @@ class _Recorder:
 
     def _open(self, req, timeout=None, context=None):
         self.requests.append(req)
-        return _FakeResponse(json.dumps(self.payload).encode())
+        payload = self.payload(req.full_url) if callable(self.payload) else self.payload
+        return _FakeResponse(json.dumps(payload).encode())
 
 
 class HeadersTest(unittest.TestCase):
@@ -175,38 +177,66 @@ class RequestTest(unittest.TestCase):
 
 
 class SchedulesTest(unittest.TestCase):
-    def test_schedules_posts_department_id_and_parses_matrix(self):
-        payload = {
-            "code": "200",
-            "msg": "获取成功",
-            "data": [
-                {
-                    "deptName": "心血管科门诊",
-                    "hospitalName": "北京大学第三医院(本部)",
-                    "visitSchedules": [
-                        {"doctorName": "张三", "visitDate": "2026-11-23", "am_pm": "AM",
-                         "leftNum": 3, "totalNum": 40, "gh_fee": "50", "recordSn": "1|2|2026-11-23|a|"},
-                        {"doctorName": "李四", "visitDate": "2026-11-23", "am_pm": "PM",
-                         "leftNum": 0, "totalNum": 20},
-                    ],
-                }
-            ],
-        }
-        with _Recorder(payload) as rec:
-            rows = BysyClient(token="0123456789abcdef").slot_rows()
-        req = rec.requests[0]
-        self.assertIn("getVisitSchedules", req.full_url)
-        # departmentId 传空串也得带上：空 body 服务端回 []
+    MATRIX = {
+        "code": "200",
+        "msg": "获取成功",
+        "data": [
+            {
+                "deptName": "心血管科门诊",
+                "hospitalName": "北京大学第三医院(本部)",
+                "visitSchedules": [
+                    {"doctorName": "张三", "visitDate": "2026-11-23", "am_pm": "AM",
+                     "leftNum": 3, "totalNum": 40, "gh_fee": "50", "recordSn": "1|2|2026-11-23|a|"},
+                    {"doctorName": "李四", "visitDate": "2026-11-23", "am_pm": "PM",
+                     "leftNum": 0, "totalNum": 20},
+                ],
+            }
+        ],
+    }
+
+    DEPTS = {
+        "code": "200", "msg": "ok",
+        "data": [
+            {"_id": "stale-1", "deptName": "不挂号", "isAppointment": False},
+            {"_id": "dep-1", "deptName": "心血管科门诊", "isAppointment": True},
+        ],
+    }
+
+    def _route(self, url):
+        return self.DEPTS if "getDepartments" in url else self.MATRIX
+
+    def _sent(self, req):
         import base64
 
         from bdkq_crypto import sm4_decrypt
 
         wire = json.loads(req.data.decode())
-        sent = json.loads(sm4_decrypt(base64.b64decode(wire["encrypted"]), by.sm4_key("0123456789abcdef")))
-        self.assertEqual(sent, {"departmentId": ""})
+        return json.loads(sm4_decrypt(base64.b64decode(wire["encrypted"]), by.sm4_key("0123456789abcdef")))
+
+    def test_schedules_defaults_to_a_real_department_id(self):
+        with _Recorder(self._route) as rec:
+            rows = BysyClient(token="0123456789abcdef").slot_rows()
+        # 先问科室列表挑真实 id，再拿矩阵：服务端认不出 id 会一直转圈
+        self.assertEqual(len(rec.requests), 2)
+        self.assertIn("getDepartments", rec.requests[0].full_url)
+        self.assertIn("getVisitSchedules", rec.requests[1].full_url)
+        self.assertEqual(self._sent(rec.requests[1]), {"departmentId": "dep-1"})
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["leftNum"], 3)
         self.assertEqual(rows[0]["amPm"], "AM")
+
+    def test_schedules_reuses_the_anchor(self):
+        client = BysyClient(token="0123456789abcdef")
+        with _Recorder(self._route) as rec:
+            client.schedules()
+            client.schedules()
+        self.assertEqual(len(rec.requests), 3)
+
+    def test_schedules_takes_an_explicit_department_id(self):
+        with _Recorder(self.MATRIX) as rec:
+            BysyClient(token="0123456789abcdef").schedules("given-9")
+        self.assertEqual(len(rec.requests), 1)
+        self.assertEqual(self._sent(rec.requests[0]), {"departmentId": "given-9"})
 
     def test_slot_rows_only_available(self):
         payload = {
@@ -218,7 +248,7 @@ class SchedulesTest(unittest.TestCase):
                 ]},
             ],
         }
-        with _Recorder(payload):
+        with _Recorder(lambda url: self.DEPTS if "getDepartments" in url else payload):
             rows = BysyClient(token="0123456789abcdef").slot_rows(only_available=True)
         self.assertEqual([r["doctorName"] for r in rows], ["y"])
 

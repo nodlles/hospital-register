@@ -84,8 +84,9 @@ PATH_PAY = "api/v1/payment/createPayment"
 PATH_LOGIN = "api/v2/wx/patient/login"
 
 CODE_OK = "200"
-# 号源矩阵一次返回全院 8 天，实测 30~60s，比普通接口慢一个量级
-SCHEDULES_TIMEOUT = 120.0
+# 号源矩阵一次返回全院 8 天（10.9 MB），实测 100s，比普通接口慢两个量级
+SCHEDULES_TIMEOUT = 300.0
+PATH_AREAS_FOR_SCHEDULES = "api/v1/appointment/getDepartments"
 CODE_NEED_LOGIN = "201"
 
 
@@ -433,10 +434,15 @@ class BysyClient:
     def schedules(self, department_id: str = "", *, timeout: float = SCHEDULES_TIMEOUT) -> list[dict[str, Any]]:
         """**一次拿全院八天号源矩阵**。
 
-        实测（真实 token）：`api/v2/appointment/area/getVisitSchedules` 对
-        `departmentId` / `startDate` / `endDate` 一概不理，永远返回同一份
-        「276 个可挂号科室 × 8 天」的矩阵；空 body 反而返回 `[]`。所以这里
-        `department_id` 只是为了让服务端不返回空，筛选请自己在上层做。
+        实测（真实 token）：
+
+        * 传一个**真实科室 `_id`** → 100s 返回 10.9 MB，「276 个可挂号科室 × 8 天」
+          的完整矩阵，换别的科室 id 也是同一份（服务端只拿它认路，不拿它筛）；
+        * 传不存在的 id / 空串 → 服务端**一直算不回来**（600s 都没响应），
+          空 body 则直接给 `[]`。
+
+        所以 `department_id` 留空时这里会自动去科室列表里挑一个真实可挂号 id，
+        筛选请在上层做。
 
         返回结构：[{deptName, hospitalName, position, id, visitSchedules: [...]}]
         visitSchedules 里每条的字段非常全（见 BYSY.md），关键的是：
@@ -447,10 +453,28 @@ class BysyClient:
             gh_fee / registerFee 挂号费、sop_name / clinicName 号别名称
             recordSn  下单时要回传的排班标识
         """
-        # 这份矩阵一次就是全院八天号源，服务端 30~60s 才回，默认 15s 超时根本不够
-        res = self.post(PATH_SCHEDULES, {"departmentId": str(department_id)}, timeout=timeout)
+        # 这份矩阵一次就是全院八天号源（10.9 MB），服务端要算 100s 左右
+        res = self.post(
+            PATH_SCHEDULES,
+            {"departmentId": str(department_id or self._schedule_anchor())},
+            timeout=timeout,
+        )
         data = res.ensure_ok("getVisitSchedules").data
         return data if isinstance(data, list) else []
+
+    def _schedule_anchor(self) -> str:
+        """给号源矩阵挑一个真实科室 id：服务端不认路时会一直转圈，认路才回数据。"""
+        cached = getattr(self, "_anchor_id", "")
+        if cached:
+            return cached
+        res = self.post(
+            PATH_AREAS_FOR_SCHEDULES, {"isShow": True, "isAffiliated": True}, timeout=60
+        )
+        for dept in res.ensure_ok("getDepartments").data or []:
+            if dept.get("isAppointment") and dept.get("_id"):
+                self._anchor_id = str(dept["_id"])
+                return self._anchor_id
+        raise BysyError("科室列表里没有可挂号的科室 id，拿不到号源矩阵")
 
     def slot_rows(
         self, *, only_available: bool = False, timeout: float = SCHEDULES_TIMEOUT
