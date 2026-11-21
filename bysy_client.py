@@ -82,6 +82,7 @@ PATH_SCHEDULE_TIMES = "api/v2/appointment/getVisitSchedulesTimes"
 PATH_CREATE = "api/v2/appointment/createAppointment"
 PATH_PAY = "api/v1/payment/createPayment"
 PATH_LOGIN = "api/v2/wx/patient/login"
+PATH_PATIENTS = "/api/v2/person/patient/patientManager"
 
 CODE_OK = "200"
 # 号源矩阵一次返回全院 8 天（10.9 MB），实测 100s，比普通接口慢两个量级
@@ -501,14 +502,182 @@ class BysyClient:
                     "scheduleId": s.get("_id") or s.get("id"),
                     "nightFlag": s.get("nightFlag"),
                     "isStopVisit": s.get("isStopVisit"),
+                    # 分时段查询/下单都要整行原样回传，这里留着别动
+                    "raw": s,
                 })
         return rows
 
-    def create_appointment(self, **params: Any) -> Any:
-        raise BysyNotCalibrated(
-            "createAppointment 是写接口：参数没和真实返回对齐前不提交，"
-            "与 bdkq 那边的做法一致"
+    # ---------------------------------------------------------- 分时段号源
+
+    def schedule_times(self, schedule: dict[str, Any], *, timeout: float = 30.0) -> list[dict[str, Any]]:
+        """**查一条排班的分时段号源**（源码 `queryScheduleTimes === addAppointment(...)`，见下）。
+
+        源码 `modules/appointment` 的 `queryScheduleTimes(schedule)` 做法是把整条排班
+        **原样展开**再补一个 `userId` 打过去：`Object.assign({}, schedule, {userId})`。
+        响应 `data` 是一个数组，每条就是**一个具体号源**：
+
+            beginTime / endTime   就诊时段，如 15:30~15:40（实测都有值）
+            sortSn / yyhSn        号序、预约号（下单要回传）
+            schduleTimeSn         "175224186|4465615"，服务端自己的时段号（拼错是源码原样）
+            timeText              "无" 以外表示特殊提示
+            _id / id              与排班 `_id` 相同（源码当 visitScheduleTimeId 回传）
+
+        **响应条数 = 排班 `leftNum`**（实测 24 剩号就回 24 条），每条里的 `leftNum`
+        恒为 0——它是「这一条就是一个可约的号」，不是剩余数，别再拿它筛。
+        """
+        body = {**schedule, "userId": self.user_id or ""}
+        res = self.post(PATH_SCHEDULE_TIMES, body, timeout=timeout)
+        data = res.ensure_ok("getVisitSchedulesTimes").data
+        if isinstance(data, dict):  # 源码 `getScheduleTimes` 兼容对象/数组两种
+            data = list(data.values())
+        return data if isinstance(data, list) else []
+
+    def interval_rows(self, schedule: dict[str, Any], *, timeout: float = 30.0) -> list[dict[str, Any]]:
+        """分时段摊平成便于挑时段的形状，按 beginTime 升序。"""
+        rows: list[dict[str, Any]] = []
+        for it in self.schedule_times(schedule, timeout=timeout):
+            rows.append({
+                "beginTime": it.get("beginTime") or it.get("begin_time") or "",
+                "endTime": it.get("endTime") or it.get("end_time") or "",
+                "sortSn": it.get("sortSn") if it.get("sortSn") is not None else it.get("sort_sn"),
+                "yyhSn": it.get("yyhSn") or it.get("yyh_sn"),
+                "schduleTimeSn": it.get("schduleTimeSn"),
+                "timeText": it.get("timeText") or "",
+                "deptName": it.get("deptName"),
+                "doctorName": it.get("doctorName"),
+                "visitDate": it.get("visitDate"),
+                "amPm": it.get("am_pm") or it.get("amPm"),
+                "raw": it,
+            })
+        rows.sort(key=lambda r: (r["beginTime"] or "99:99", str(r["sortSn"] or "")))
+        return rows
+
+    # ------------------------------------------------------------ 就诊人
+
+    def patients(self, *, timeout: float = 30.0) -> list[dict[str, Any]]:
+        """当前账号的就诊人列表（`patientManager`，源码 `getPatientList`）。
+
+        实测这个账号返回 `[]`：**没有就诊人时点「在线挂号」会弹「请先添加就诊人」**，
+        下单接口在此之前无法端到端验证。
+        """
+        res = self.post(
+            PATH_PATIENTS,
+            {"userId": self.user_id or "", "showLoading": True},
+            timeout=timeout,
         )
+        data = res.ensure_ok("patientManager").data
+        return data if isinstance(data, list) else []
+
+    # -------------------------------------------------------------- 下单
+
+    def build_appointment_payload(
+        self,
+        schedule: dict[str, Any],
+        *,
+        patient_card_id: str,
+        time_info: dict[str, Any] | None = None,
+        self_pay: bool = True,
+        m_ticket: str = "",
+        m_randstr: str = "",
+    ) -> dict[str, Any]:
+        """按源码 `createAppointment` 原样拼下单请求体（不发送）。
+
+        源码（`modules/appointment/order_confirm`）：
+            g = Object.assign({}, timeInfo || {}, schedule)
+            y = Object.assign({
+                    scheduleId, visitScheduleTimeId, patientCardId,
+                    appointmentType: selfPay ? "zf" : "yb",
+                    beginTime, endTime, sortSn, yyhSn,
+                    mTicket, mRandstr, userId, clientType: "wechat",
+                }, g)
+        注意 `g` 在最后合并，所以排班行和分时段里的同名字段会覆盖上面的默认值。
+        `visitScheduleTimeId` 取分时段那条的 `_id || id`。
+        """
+        merged = {**(time_info or {}), **schedule}
+        slot_id = None
+        if time_info:
+            slot_id = time_info.get("_id") or time_info.get("id")
+        payload = {
+            "scheduleId": schedule.get("_id") or schedule.get("id"),
+            "visitScheduleTimeId": slot_id,
+            "patientCardId": patient_card_id,
+            "appointmentType": "zf" if self_pay else "yb",
+            "beginTime": (time_info or {}).get("beginTime") or "",
+            "endTime": (time_info or {}).get("endTime") or "",
+            "sortSn": (time_info or {}).get("sortSn") or "",
+            "yyhSn": (time_info or {}).get("yyhSn") or "",
+            "mTicket": m_ticket,
+            "mRandstr": m_randstr,
+            "userId": self.user_id or "",
+            "clientType": "wechat",
+        }
+        payload.update(merged)
+        return payload
+
+    def create_appointment(
+        self,
+        schedule: dict[str, Any],
+        *,
+        patient_card_id: str = "",
+        time_info: dict[str, Any] | None = None,
+        self_pay: bool = True,
+        m_ticket: str = "",
+        m_randstr: str = "",
+        dry_run: bool = True,
+        timeout: float = 60.0,
+    ) -> dict[str, Any]:
+        """**下单（写接口）**。默认 `dry_run=True` 只返回将要发送的请求体，不发请求。
+
+        真要下单必须满足：
+        * `patient_card_id`：就诊人卡的 id（`patients()[i]["patientCards"][0]["id"]`）；
+        * 有就诊人——这个账号现在一个都没有；
+        * 反爬验证码 `mTicket`/`mRandstr`：源码里下单前一定会弹腾讯验证码组件，
+          这两个值只能在小程序里拿到，纯 HTTP 拿不到。
+
+        成功返回 `{_id, appointmentFee, createdAt, ...}`：自费（zf）接下来调
+        `create_payment`；医保（yb）走 `checkAppointmentPayment`。
+        """
+        if dry_run:
+            return self.build_appointment_payload(
+                schedule,
+                patient_card_id=patient_card_id,
+                time_info=time_info,
+                self_pay=self_pay,
+                m_ticket=m_ticket,
+                m_randstr=m_randstr,
+            )
+        if not patient_card_id:
+            raise BysyError("下单缺 patient_card_id（先 patients() 拿就诊人卡 id）")
+        body = self.build_appointment_payload(
+            schedule,
+            patient_card_id=patient_card_id,
+            time_info=time_info,
+            self_pay=self_pay,
+            m_ticket=m_ticket,
+            m_randstr=m_randstr,
+        )
+        res = self.post(PATH_CREATE, body, timeout=timeout)
+        return res.ensure_ok("createAppointment").data
+
+    # -------------------------------------------------------------- 支付
+
+    def build_payment_payload(self, appointment_id: str, open_id: str) -> dict[str, Any]:
+        """源码 `payInfo` 页：`{appointmentId, payWay: "MINIPROGRAM", openId}`。"""
+        return {"appointmentId": appointment_id, "payWay": "MINIPROGRAM", "openId": open_id}
+
+    def create_payment(
+        self, appointment_id: str, open_id: str, *, timeout: float = 30.0
+    ) -> dict[str, Any]:
+        """**划价（写接口）**，返回 `{orderInfo: "<JSON 字符串>", ...}`。
+
+        `orderInfo` 是 `wx.requestPayment` 的参数（timeStamp/nonceStr/package/signType/
+        paySign），**只能在微信小程序里调起**：纯 HTTP 到这里就是终点，
+        最后一步必须在小程序里点，或者去驱动小程序 UI。
+        """
+        res = self.post(
+            PATH_PAY, self.build_payment_payload(appointment_id, open_id), timeout=timeout
+        )
+        return res.ensure_ok("createPayment").data
 
 
 # ------------------------------------------------------------------ CLI
@@ -519,6 +688,21 @@ def _load_endpoints() -> dict[str, Any]:
 
     p = Path(__file__).with_name("bysy_endpoints.json")
     return json.loads(p.read_text(encoding="utf-8"))
+
+
+def _configured_client() -> "BysyClient | None":
+    from pathlib import Path
+
+    cfg_path = Path(__file__).with_name("config.json")
+    if not cfg_path.exists():
+        print("需要 config.json 里的 bysy.token")
+        return None
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8")).get("bysy") or {}
+    client = BysyClient.from_config(cfg)
+    if not client.logged_in:
+        print("config.json 里没有 bysy.token")
+        return None
+    return client
 
 
 def main(argv: list[str]) -> int:
@@ -543,14 +727,8 @@ def main(argv: list[str]) -> int:
             print(d.get("doctorSn"), d.get("doctorName"), d.get("title"))
         return 0
     if cmd == "slots":
-        cfg_path = Path(__file__).with_name("config.json")
-        if not cfg_path.exists():
-            print("需要 config.json 里的 bysy.token 才能查号源")
-            return 2
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8")).get("bysy") or {}
-        client = BysyClient.from_config(cfg)
-        if not client.logged_in:
-            print("config.json 里没有 bysy.token")
+        client = _configured_client()
+        if client is None:
             return 2
         kw = argv[2] if len(argv) > 2 else ""
         rows = [r for r in client.slot_rows(only_available=True) if not kw or kw in (r["deptName"] or "")]
@@ -558,6 +736,30 @@ def main(argv: list[str]) -> int:
         for r in rows:
             print(f"{r['visitDate']} {r['amPm']}\t{r['hospitalName']}\t{r['deptName']}\t"
                   f"{r['doctorName']}\t余{r['leftNum']}/{r['totalNum']}\t{r['fee']}元")
+        return 0
+    if cmd == "times":
+        client = _configured_client()
+        if client is None:
+            return 2
+        kw = argv[2] if len(argv) > 2 else ""
+        rows = [r for r in client.slot_rows(only_available=True) if not kw or kw in (r["deptName"] or "")]
+        if not rows:
+            print(f"没有匹配「{kw}」的有号排班")
+            return 1
+        row = rows[0]
+        print(f"{row['deptName']} {row['doctorName']} {row['visitDate']} {row['amPm']} 余{row['leftNum']}")
+        for it in client.interval_rows(row["raw"]):
+            print(f"  {it['beginTime']}~{it['endTime']}\t号序{it['sortSn']}\tyyhSn={it['yyhSn']}")
+        return 0
+    if cmd == "patients":
+        client = _configured_client()
+        if client is None:
+            return 2
+        people = client.patients()
+        print(f"{len(people)} 个就诊人")
+        for p in people:
+            cards = p.get("patientCards") or []
+            print(f"  {p.get('patientName') or p.get('name')}\t卡={[c.get('id') for c in cards]}")
         return 0
     if cmd == "probe":
         bodies = {
@@ -585,7 +787,7 @@ def main(argv: list[str]) -> int:
         print(f"{res.status} code={res.code} {res.msg}")
         return 0 if res.ok else 1
     print(__doc__)
-    print("可用命令: areas | depts | hot | probe | check-auth | slots")
+    print("可用命令: areas | depts | hot | probe | check-auth | slots | times | patients")
     return 2
 
 

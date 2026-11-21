@@ -33,13 +33,28 @@ curl 'http://127.0.0.1:9400/v1/files/download?scope=scripts&path=148' -o as.js
 
 | scriptId | 文件 | 字节 |
 | --- | --- | --- |
-| 148 | `https://usr/app-service.js` | 1963462（12738 行） |
+| 148 | `https://usr/app-service.js` | 1963462（12738 行）|
 | 150 | `https://usr/subpackage-call/app-service.js` | 845506 |
+| 224 | `https://usr/modules/appointment/app-service.js` | 231195（2655 行）|
 | 146 | `https://usr/__plugin__/wx1fe8d9a3cb067a75/appservice.js` | — |
 | 134 / 110 / 144 | `lib/WASubContext.js` / `WAServiceMainContext.js` / `WmpfInject` | — |
 
 早期版本（1.0.1）的 `Debugger.getScriptSource`、codecache 反编译、HeapProfiler 捞堆
 全都不必要了：`wad_save_script_source` 一句就能把真源码落盘。
+
+**分包是按需加载的**：主包只有 148，`subpackage-call` 和 `modules/appointment` 得等对应
+页面打开才出现。要抓预约相关的代码，先用 logic 层 `wx.navigateTo` 进一次预约页：
+
+```
+wad_evaluate_script {"layer":"logic",
+  "expression":"new Promise(r=>wx.navigateTo({url:'/modules/appointment/doctor_intro/index',
+                 success:()=>r('ok'),fail:e=>r('fail')}))"}
+wad_list_scripts     # 这时才多出 224 = https://usr/modules/appointment/app-service.js
+```
+
+页面清单可以从运行时配置里读：
+`__wxConfig.pages`（主包页面）和 `__wxConfig.subPackages`（分包 root，
+`modules/appointment/`、`modules/patient/`、`modules/cloud_room/` 等 20 个）。
 
 ## 请求协议
 
@@ -164,6 +179,8 @@ ndyfy-master-system           {version:"2.2.2", platform:"wechat", system:"17", 
 | `api/v1/appointment/getDepartments` `{"isShow":true,"isAffiliated":true}` | 200，**664 个科室**（带 hospitalName / isAppointment / deptSn），14s |
 | `api/v2/appointment/getDepartmentDoctors` 见下 | 200，「获取医生列表成功V2」，**57 位医生** |
 | `api/v2/appointment/area/getVisitSchedules` `{"departmentId":<真实科室 _id>}` | 200，**100s / 10.9 MB / 276 个科室 / 4242 条排班** |
+| `api/v2/appointment/getVisitSchedulesTimes` 整条排班 + `userId` | 200，**条数 = 排班 `leftNum`**，每条带 `15:30~15:40` 之类时段，0.2s |
+| `/api/v2/person/patient/patientManager` `{"userId":...}` | 200「请求成功」，**`[]`：这个账号没有就诊人** |
 
 `getDepartmentDoctors` 的请求体（源码调用点原样，已实测字段全对）：
 
@@ -204,14 +221,90 @@ ndyfy-master-system           {version:"2.2.2", platform:"wechat", system:"17", 
 号源窗口实测 8 天（`2026-11-21` ~ `2026-11-28`），第 8 天 15:00 放号、当日号按上午 10:00 /
 下午 15:00 / 晚间 18:00 截止，与 README 里的挂号规则一致。
 
-## 还没校准的（不猜，不写「大概对」的实现）
+### 分时段（`getVisitSchedulesTimes`）
 
-* `api/v2/appointment/getVisitSchedulesTimes`（分时段号源）——分时段科室下单要 `timeIntervalCode`；
-* `api/v2/appointment/createAppointment`（下单）+ `api/v1/payment/createPayment`（支付）；
+源码 `modules/appointment`（单独的端文件 `https://usr/modules/appointment/app-service.js`，
+要先进预约页才会加载）里的 `queryScheduleTimes(schedule)`：
+
+```js
+m = Object.assign({}, schedule, {userId: f()})   // 整条排班原样展开，只补 userId
+d.default.queryScheduleTimes(m)
+```
+
+所以请求体就是**号源矩阵里那一整条排班**（81 个字段全带上，别裁），把锚点 `_id`
+抠掉也照样返回，但别省——源码不省。
+
+响应 `data` 是数组（源码 `getScheduleTimes` 兼容对象/数组），**一条就是一个可约的号**：
+
+| 字段 | 含义 |
+| --- | --- |
+| `beginTime` / `endTime` | 就诊时段，如 `15:30`~`15:40`（实测每条都有值） |
+| `sortSn` / `yyhSn` | 号序 / 预约号，下单要回传 |
+| `schduleTimeSn` | `"175224186|4465615"`（源码就是这个拼写），时段标识 |
+| `timeText` | 实测都是 `"无"`，其他值表示特殊提示 |
+| `_id` / `id` | **与排班 `_id` 相同**，源码当 `visitScheduleTimeId` 回传 |
+
+**坑**：返回条数 = 排班 `leftNum`（余 24 号就回 24 条），而每条里的 `leftNum`/`totalNum`
+恒为 `0`——它是「这一条本身就是一个能约的号」，不是剩余数，别拿它筛。挑时段按
+`beginTime` 升序即可（`interval_rows()` 已经排好）。
+
+### 就诊人
+
+`POST /api/v2/person/patient/patientManager {"userId": ..., "showLoading": true}`
+（源码 `getPatientList`，注意路径带前导 `/`）→ 就诊人数组，每人的 `patientCards[0].id`
+就是下单要的 `patientCardId`。
+
+实测这个账号回 `[]`：**没有就诊人时点「在线挂号」直接弹「暂无就诊人，请先添加就诊人」**。
+
+### 下单（`createAppointment`）
+
+源码 `modules/appointment/order_confirm` 的 `createAppointment`：
+
+```js
+g = Object.assign({}, timeInfo || {}, schedule)
+y = Object.assign({
+      scheduleId: schedule._id || schedule.id,
+      visitScheduleTimeId: timeInfo ? timeInfo._id || timeInfo.id : null,
+      patientCardId: patient.patientCards[0].id,
+      appointmentType: selfPay ? "zf" : "yb",
+      beginTime: timeInfo ? timeInfo.beginTime : "",
+      endTime:   timeInfo ? timeInfo.endTime   : "",
+      sortSn:    timeInfo ? timeInfo.sortSn    : "",
+      yyhSn:     timeInfo ? timeInfo.yyhSn     : "",
+      mTicket, mRandstr, userId, clientType: "wechat",
+    }, g)
+```
+
+**注意 `g` 在最后合并**，排班行和时段里的同名字段会覆盖上面那些默认值，所以实现里
+先摆默认值再 `payload.update({**timeInfo, **schedule})`（`build_appointment_payload()`
+就是干这个的，37 个默认字段 + 排班 80 多个字段，实测拼出来 81 个键）。
+
+成功回 `data._id`（appointmentId）、`appointmentFee`、`createdAt`；自费接着 `createPayment`，
+医保走 `checkAppointmentPayment`。
+
+**为什么默认 `dry_run=True`**：下单前小程序一定会弹腾讯验证码组件，`mTicket`/`mRandstr`
+只能在小程序里拿到；再加上这个账号没有就诊人，写接口目前没法端到端验证。
+
+### 支付（`createPayment`）
+
+源码 `modules/appointment/payInfo`：
+
+```js
+{appointmentId, payWay: "MINIPROGRAM", openId}   // openId 从 storage 的 "openId" 取
+```
+
+返回 `data.orderInfo` 是**一段 JSON 字符串**，内容就是 `wx.requestPayment`
+的参数（`timeStamp` / `nonceStr` / `package` / `signType` / `paySign`）。
+
+**这是纯 HTTP 的终点**：`wx.requestPayment` 只能在微信小程序里调起，服务端调不动。
+所以自动化的极限是「下单成功 + 拿到支付参数」，最后一下必须在小程序里点
+（或者用 WeAppDev 驱动小程序 UI 去点 `payInfo` 页）。
+
+## 还没校准的
+
 * `getDoctors`（v1，department 那个）：白名单里留着，当前版本没有调用方，估计是废弃 handler。
-
-下单还有个业务前提：**这个账号还没有就诊人**，点「在线挂号」会弹
-「暂无就诊人，请先添加就诊人」，所以写接口在那之前没法端到端验证。
+* 医保链路：`checkAppointmentPayment` / `afterQueryHisOrderStatus` / `yb/*`，全部依赖于
+  「先有一个成功的下单」，同样卡在就诊人。
 
 ## 命令
 
