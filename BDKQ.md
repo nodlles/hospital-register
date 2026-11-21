@@ -47,7 +47,24 @@ IP 变了就重跑一次上面那条 curl 换掉它。模拟器里想设 hosts �
 
 ### 1. 拿登录态
 
-小程序需要 `access_token`，它只能靠微信运行时 `wx.login` 换。两条路：
+小程序需要 `access_token`，它只能靠微信运行时拿。三条路：
+
+- **直接从运行时读现成的登录态**（最省事，推荐）：WeAppDev 网关开着、小程序停在首页，然后
+
+  ```bash
+  python3 bdkq_runtime.py                        # 打印 token / api_version / 剩余有效期
+  python3 bdkq_token.py --source runtime --force # 或者让 token 模块走这条通道
+  ```
+
+  `bdkq_runtime.py` 读网关的 `GET /v1/hook/store`，里面是小程序自己刚发出去的
+  真实请求（连 `access_token` / `signature` / `request_otp` / `rid` 请求头一起）。
+  有现成记录就直接用，**不重启小程序**；记录里的 token 剩余不足 60 秒才
+  `clear` + `restart` 一次让它自己再发一遍。
+
+  两个坑：一是 `/login/wechat` 那条记录的请求头里带的是**旧的** `access_token`，
+  新 token 在它的加密响应体里，要用 `decrypt_response` 解出来；二是那条 URL 上写的是
+  `@default`，真正的 `api_version` 在响应头 `x-version`（当前 `45ff03e9`）——
+  用 `default` 或 `331` 一律 `status 1000 访问受限`。
 
 - 跑 `bdkq_har.py`，把浏览器/代理导出的 HAR 或 DevTools「Copy as cURL」喂进来：
 
@@ -60,7 +77,7 @@ IP 变了就重跑一次上面那条 curl 换掉它。模拟器里想设 hosts �
   拼出 `base_url`（去掉 `/{tenant}@{version}` 尾巴）和见过的接口路径清单。
   生成的配置权限 0600。
 
-- **或者什么都不用抓**（推荐）：让微信运行时里开着北大口腔小程序，然后
+- **或者让运行时现换一个**：微信运行时里开着北大口腔小程序，然后
 
   ```bash
   python3 bdkq_token.py -c config.bdkq.local.json --force
@@ -114,12 +131,14 @@ python3 bdkq_watch.py -c config.bdkq.local.json --duration 300 --interval 5
 | `bdkq_har.py` | HAR / cURL / 日志文本 → 配置 |
 | `bdkq_probe.py` | 只读探测 + 字段校准 |
 | `bdkq_watch.py` | 只读号源监控 + 通知（token 自动续期） |
-| `bdkq_token.py` | `wx.login` → token 自动换取与续期，带本地缓存 |
+| `bdkq_token.py` | `wx.login` → token 自动换取与续期，带本地缓存（`--source runtime/devtools/auto`） |
+| `bdkq_runtime.py` | 从 WeAppDev 运行时的 `hook/store` 直接读登录态，免抓包免重启 |
 | `wxdevtools.py` | 免抓包通道：DevTools 协议读小程序登录态 / `wx.login` |
 | `bdkq_endpoints.json` | 从包体里提取的 132 个接口，按名字索引 |
 | `config.bdkq.example.json` | 配置样板 |
 | `tests/test_bdkq_crypto.py` | 25 条离线测试 |
 | `tests/test_bdkq_token.py` | token 解析、续期判定、缓存 18 条 |
+| `tests/test_bdkq_runtime.py` | 运行时记录挑选、登录响应解 token、有记录不重启 13 条 |
 | `tests/test_wxdevtools.py` | 采集结果转配置的纯函数 28 条 |
 
 ## 与真服务器校准出来的两处修正（2026-11-18）

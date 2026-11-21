@@ -33,6 +33,8 @@ from bdkq_crypto import (
 )
 
 DEFAULT_TENANT = "xcx-bjdxkqyy-wx"
+# 余号查询接口的固定业务号（抓包校准，与账号无关）
+DEFAULT_CASE_ID = "5665665556"
 DEFAULT_REFERER = "https://servicewechat.com/wxf47aa38d871be854/331/page-frame.html"
 DEFAULT_UA = (
     "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -334,12 +336,46 @@ class BdkqClient:
         data = resp.data or {}
         return list(data.get("lists") or [])
 
-    def doctor_list(self, dept_code: str, **extra: Any) -> list[dict[str, Any]]:
-        query = {"deptCode": dept_code}
-        query.update(extra)
-        resp = self.get("/api/regist/getYyDoctorList", query).ensure_ok("getYyDoctorList")
-        data = resp.data or {}
-        return list(data.get("lists") or [])
+    def today_dept_list(self, area_code: str = "0") -> list[dict[str, Any]]:
+        """当日/明日挂号用的科室列表（GET，参数只有 areaCode）。"""
+        resp = self.get("/api/regist/getTodayDeptList",
+                        {"areaCode": str(area_code)}).ensure_ok("getTodayDeptList")
+        data = resp.data or []
+        return list(data) if isinstance(data, list) else list(data.get("lists") or [])
+
+    def doctor_list(self, dept_code: str, area_code: str = "0",
+                    **extra: Any) -> list[dict[str, Any]]:
+        """某科室的医生与号源。
+
+        参数名用 2026-11-21 真机抓包校准过的 `deptCode` + `areaCode`（POST
+        `/api/regist/getDoctorList`）。返回每项含 doctId / doctName / scheduleId /
+        visitDate(毫秒) / amPm / numbers（剩余号数）/ fee / ygzc（职称）/ seqDoct。
+        """
+        body: dict[str, Any] = {"deptCode": str(dept_code), "areaCode": str(area_code)}
+        body.update(extra)
+        resp = self.post("/api/regist/getDoctorList", body).ensure_ok("getDoctorList")
+        data = resp.data or []
+        return list(data) if isinstance(data, list) else list(data.get("lists") or [])
+
+    def doctor_list_v2(self, dept_code: str, area_code: str = "0",
+                       **extra: Any) -> list[dict[str, Any]]:
+        """预约挂号（非当日）的医生列表，参数与返回结构同 doctor_list，接口不同。"""
+        body: dict[str, Any] = {"deptCode": str(dept_code), "areaCode": str(area_code)}
+        body.update(extra)
+        resp = self.post("/api/regist/getYyDoctorList", body).ensure_ok("getYyDoctorList")
+        data = resp.data or []
+        return list(data) if isinstance(data, list) else list(data.get("lists") or [])
+
+    def remain_board(self, case_id: str = DEFAULT_CASE_ID) -> list[dict[str, Any]]:
+        """余号查询（号源公示）：一条 POST 拿到全院「已满 / 余号」看板。
+
+        返回每项含 informationContent（如「牙体牙髓科_普通_上午」）、
+        regValue（「已满」或余号数）、updateTime。
+        """
+        resp = self.post("/api/his/queue/GetOutDepartmentReginfo",
+                         {"caseId": str(case_id)}).ensure_ok("GetOutDepartmentReginfo")
+        data = resp.data or []
+        return list(data) if isinstance(data, list) else list(data.get("lists") or [])
 
     def schedule_list(self, **params: Any) -> list[dict[str, Any]]:
         resp = self.post("/api/regist/getYyScheduleList", params).ensure_ok("getYyScheduleList")

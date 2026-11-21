@@ -114,6 +114,17 @@ def refresh_via_devtools(client: BdkqClient, *, ports: Any = None) -> BdkqClient
     return client
 
 
+def refresh_via_runtime(client: BdkqClient, *, gateway: str = "") -> BdkqClient:
+    """走 WeAppDev 运行时取登录态（不需要人抓包，见 bdkq_runtime.py）。"""
+    from bdkq_runtime import DEFAULT_GATEWAY, lift
+
+    state = lift(gateway or DEFAULT_GATEWAY)
+    client.access_token = state["access_token"]
+    if state.get("api_version"):
+        client.api_version = state["api_version"]
+    return client
+
+
 def ensure_client(config: dict[str, Any], config_path: str | Path | None = None,
                   *, force: bool = False, refresh_fn: Any = None) -> tuple[BdkqClient, str]:
     """保证拿到一个可用的客户端。
@@ -140,7 +151,7 @@ def ensure_client(config: dict[str, Any], config_path: str | Path | None = None,
         client = refresh(client)
         token = client.access_token
         version = client.api_version
-        source = "devtools"
+        source = "refresh"
         if config_path is not None:
             save_cache(config_path, token, version)
 
@@ -156,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-c", "--config", default="config.bdkq.local.json")
     parser.add_argument("--show", action="store_true", help="只看当前有效期，不续期")
     parser.add_argument("--force", action="store_true", help="强制续期")
+    parser.add_argument("--source", choices=("auto", "runtime", "devtools"), default="auto",
+                        help="续期通道：runtime 走 WeAppDev 运行时（推荐），devtools 走微信开发者工具")
     args = parser.parse_args(argv)
 
     path = Path(args.config)
@@ -171,7 +184,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{label}: {'有效 ' + str(left // 60) + ' 分钟' if left else '没有或不是 JWT'}")
         return 0
 
-    client, source = ensure_client(config, path, force=args.force)
+    if args.source == "runtime":
+        refresh_fn = refresh_via_runtime
+    elif args.source == "devtools":
+        refresh_fn = refresh_via_devtools
+    else:
+        # 先试运行时（更稳、无需微信开发者工具），失败再退回开发者工具通道
+        def refresh_fn(client: BdkqClient) -> BdkqClient:  # type: ignore[misc]
+            try:
+                return refresh_via_runtime(client)
+            except Exception as exc:  # noqa: BLE001 - 换一条通道继续
+                print(f"运行时通道不可用（{exc}），改用开发者工具")
+                return refresh_via_devtools(client)
+
+    client, source = ensure_client(config, path, force=args.force, refresh_fn=refresh_fn)
     left = token_seconds_left(client.access_token)
     print(f"token 来源: {source}，剩余 {left // 60 if left else '?'} 分钟，api_version={client.api_version}")
     return 0

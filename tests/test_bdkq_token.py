@@ -151,7 +151,7 @@ class EnsureClientTest(unittest.TestCase):
     def test_refreshes_when_nothing_usable(self) -> None:
         client, source = bdkq_token.ensure_client(
             base_config(""), self.config_path, refresh_fn=self.refresh)
-        self.assertEqual(source, "devtools")
+        self.assertEqual(source, "refresh")
         self.assertEqual(self.calls, ["refresh"])
         self.assertEqual(client.api_version, "fresh")
         # 换完要落到缓存里，下次不用再换
@@ -160,7 +160,7 @@ class EnsureClientTest(unittest.TestCase):
     def test_force_ignores_valid_token(self) -> None:
         client, source = bdkq_token.ensure_client(
             base_config(make_token(7200)), self.config_path, force=True, refresh_fn=self.refresh)
-        self.assertEqual(source, "devtools")
+        self.assertEqual(source, "refresh")
         self.assertEqual(self.calls, ["refresh"])
         self.assertEqual(client.api_version, "fresh")
 
@@ -168,7 +168,7 @@ class EnsureClientTest(unittest.TestCase):
         bdkq_token.save_cache(self.config_path, make_token(-100), "old")
         _, source = bdkq_token.ensure_client(
             base_config(""), self.config_path, refresh_fn=self.refresh)
-        self.assertEqual(source, "devtools")
+        self.assertEqual(source, "refresh")
 
 
 if __name__ == "__main__":
